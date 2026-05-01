@@ -19,7 +19,7 @@ from utils.viz import draw_overlaid, draw_heatmap
 # =========================================== CONSTANTS ===========================================
 
 INPUT_RESOLUTION = 352
-MODEL_PATH = 'pretrain'
+MODEL_PATH = 'data/pretrain'
 CONFIG_FILE_TEMPLATE = 'config/model/{}_ViT16.yaml'
 WEIGHTS_PATH = 'data/models'
 WEIGHTS_SUBPATH = {
