@@ -26,4 +26,4 @@ COPY --exclude=data . $HOME/app
 RUN chown -R user:user /home/user/
 USER user
 
-CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "7860"]
+CMD ["python", "app.py"]
