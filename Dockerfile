@@ -7,6 +7,8 @@ ENV PIP_NO_CACHE_DIR=1
 
 WORKDIR $HOME/app
 
+RUN apt-get update && apt-get install -y ffmpeg && apt-get clean && rm -rf /var/lib/apt/lists/*
+
 COPY environment.yaml $HOME/app/environment.yaml
 
 # Run conda/pip as root so it can write to /opt/conda
@@ -24,6 +26,8 @@ RUN useradd -m -u 1000 user
 
 COPY --exclude=data . $HOME/app
 RUN chown -R user:user /home/user/
+RUN mkdir -p /tmp/gradio && chown -R user:user /tmp/gradio
+
 USER user
 
 CMD ["python", "app.py"]
