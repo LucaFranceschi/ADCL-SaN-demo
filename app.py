@@ -93,6 +93,7 @@ def apply_threshold_to_segmentation(seg: np.ndarray, threshold: float) -> np.nda
     return seg_thresholded
 
 
+@gr.cache
 def update_threshold(thr: float, state: SessionState) -> PImage:
     """Update threshold for image segmentation"""
     if 'image_seg' not in state or 'image_resolution' not in state:
@@ -103,6 +104,7 @@ def update_threshold(thr: float, state: SessionState) -> PImage:
     return Image.fromarray(heatmap_mask)
 
 
+@gr.cache
 def update_threshold_video(thr: float, state: SessionState) -> str:
     """Update threshold for video segmentation"""
     if 'video_seg' not in state or \
@@ -129,6 +131,7 @@ def update_threshold_video(thr: float, state: SessionState) -> str:
     return heatmap_mask
 
 
+@gr.cache
 @torch.no_grad()
 def forward(
     image: torch.Tensor,
@@ -221,6 +224,7 @@ def submit(
     return heatmap_mask, overlaid, state
 
 
+@gr.cache
 @torch.no_grad()
 def forward_video(
     frames: torch.Tensor,
@@ -420,6 +424,74 @@ def submit_video(
     return heatmap_mask, overlaid, state
 
 
+# ============================= EXAMPLE VIDEO MANAGEMENT ============================
+
+def load_example_videos() -> dict[str, list[str]]:
+    """
+    Load example videos from data/examples directories.
+    Returns a dictionary organized by category.
+
+    Returns:
+        dict: {
+            'Original': [list of paths],
+            'Silence': [list of paths],
+            'Noise': [list of paths],
+            'Offscreen (Swapped Audio)': [list of paths]
+        }
+    """
+    examples_map = {
+        'Original': 'data/examples/original',
+        'Silence': 'data/examples/silence',
+        'Noise': 'data/examples/noise',
+        'Offscreen': 'data/examples/offscreen'
+    }
+
+    examples_dict = {}
+
+    for category, directory in examples_map.items():
+        examples_dict[category] = []
+
+        if os.path.exists(directory):
+            video_extensions = ['.mp4', '.avi', '.mov', '.mkv', '.flv', '.webm']
+            video_files = sorted([
+                os.path.join(directory, f) for f in os.listdir(directory)
+                if any(f.lower().endswith(ext) for ext in video_extensions)
+            ])
+            examples_dict[category] = video_files
+
+    return examples_dict
+
+
+def organize_examples_for_gradio(examples_dict: dict[str, list[str]]) -> list[list[str]]:
+    """
+    Organize examples for Gradio in tabular format.
+    Each row represents one video across all categories.
+
+    Args:
+        examples_dict: Dictionary of {category: [video_paths]}
+
+    Returns:
+        List of examples in format [[video_path, category_label], ...]
+    """
+    examples_list = []
+
+    # Get all unique video basenames
+    all_basenames = set()
+    for category, videos in examples_dict.items():
+        for video_path in videos:
+            basename = os.path.basename(video_path)
+            all_basenames.add(basename)
+
+    # Create examples for each unique video across categories
+    for basename in sorted(all_basenames):
+        for category, videos in examples_dict.items():
+            for video_path in videos:
+                if os.path.basename(video_path) == basename:
+                    examples_list.append([video_path])
+
+    return examples_list
+
+
 # ========================================== APPLICATION ==========================================
 
 title = "Audio-Grounded Contrastive Learning"
@@ -495,8 +567,26 @@ with gr.Blocks() as demo:
 
         # ============= VIDEO TAB =============
         with gr.TabItem("Video"):
+            gr.Markdown("### Video Input & Examples")
+
+            # Load example videos
+            example_videos_dict = load_example_videos()
+            example_videos_count = sum(len(v) for v in example_videos_dict.values())
+
             with gr.Row():
                 video_in = gr.Video(label="Video Input")
+
+            # Display examples if available
+            if example_videos_count > 0:
+                gr.Markdown(f"**Available examples:** {' | '.join([f'{cat} ({len(vids)})' for cat, vids in example_videos_dict.items() if vids])}")
+                example_videos = organize_examples_for_gradio(example_videos_dict)
+
+                if example_videos:
+                    gr.Examples(
+                        examples=example_videos,
+                        inputs=[video_in],
+                        label="Click to load an example video"
+                    )
 
             btn_video = gr.Button("Run")
 
