@@ -297,8 +297,6 @@ def save_video(
         else:  # Already BGR or other format
             frame_bgr = frame
 
-        frame_bgr = cv2.flip(frame_bgr, 1)
-
         video.write(frame_bgr)
 
     video.release()
@@ -385,7 +383,20 @@ def submit_video(
 
     print(f'{audio.shape=}')
 
-    v_seg = forward_video(frames, audio, model_name, model_version, original_resolution)
+    video_file_name = video_file.split('/')[-1]
+    print(video_file_name)
+    if any(video_file_name.startswith(cat) for cat in ['original', 'silence', 'noise', 'offscreen']):
+        likely_output_path = os.path.join(
+            'data/examples/v_seg',
+            video_file_name.removesuffix('.mp4') + '_' + '_'.join([model_name, model_version, 'v_seg.npy'])
+        )
+        if os.path.exists(likely_output_path):
+            v_seg = np.load(likely_output_path)
+        else:
+            v_seg = forward_video(frames, audio, model_name, model_version, original_resolution)
+            np.save(likely_output_path, v_seg)
+    else:
+        v_seg = forward_video(frames, audio, model_name, model_version, original_resolution)
 
     # Store in state
     state['video_seg'] = v_seg
@@ -439,23 +450,17 @@ def load_example_videos() -> dict[str, list[str]]:
             'Offscreen (Swapped Audio)': [list of paths]
         }
     """
-    examples_map = {
-        'Original': 'data/examples/original',
-        'Silence': 'data/examples/silence',
-        'Noise': 'data/examples/noise',
-        'Offscreen': 'data/examples/offscreen'
-    }
+    examples_dir = 'data/examples'
+    examples_map = ['original', 'silence', 'noise', 'offscreen']
 
     examples_dict = {}
 
-    for category, directory in examples_map.items():
+    for category in examples_map:
         examples_dict[category] = []
 
-        if os.path.exists(directory):
-            video_extensions = ['.mp4', '.avi', '.mov', '.mkv', '.flv', '.webm']
+        if os.path.exists(examples_dir):
             video_files = sorted([
-                os.path.join(directory, f) for f in os.listdir(directory)
-                if any(f.lower().endswith(ext) for ext in video_extensions)
+                os.path.join(examples_dir, f) for f in os.listdir(examples_dir) if f.startswith(category)
             ])
             examples_dict[category] = video_files
 
@@ -473,21 +478,11 @@ def organize_examples_for_gradio(examples_dict: dict[str, list[str]]) -> list[li
     Returns:
         List of examples in format [[video_path, category_label], ...]
     """
+    examples_map = ['original', 'silence', 'noise', 'offscreen']
     examples_list = []
 
-    # Get all unique video basenames
-    all_basenames = set()
-    for category, videos in examples_dict.items():
-        for video_path in videos:
-            basename = os.path.basename(video_path)
-            all_basenames.add(basename)
-
-    # Create examples for each unique video across categories
-    for basename in sorted(all_basenames):
-        for category, videos in examples_dict.items():
-            for video_path in videos:
-                if os.path.basename(video_path) == basename:
-                    examples_list.append([video_path])
+    for category in examples_map:
+        examples_list += examples_dict[category]
 
     return examples_list
 
@@ -527,44 +522,6 @@ with gr.Blocks() as demo:
         model_name_in.change(fn=update_versions, inputs=model_name_in, outputs=model_version_name_in)
 
     with gr.Tabs():
-        # ============= IMAGE + AUDIO TAB =============
-        with gr.TabItem("Image + Audio"):
-            with gr.Row():
-                image_in = gr.Image(type='pil', label="Image Input")
-                audio_in = gr.Audio(label="Audio Input")
-
-            btn = gr.Button("Run")
-
-            with gr.Row():
-                heatmap_out = gr.Image(type='pil', label="Heatmap (Grayscale)")
-                overlaid_out = gr.Image(type='pil', label="Overlaid with Original")
-
-            with gr.Row():
-                threshold_slider = gr.Slider(
-                    minimum=0,
-                    maximum=1,
-                    value=0.5,
-                    step=0.01,
-                    label="Threshold",
-                    info="Lower = more sensitive, Higher = less sensitive",
-                    interactive=False
-                )
-
-            btn.click(
-                fn=submit,
-                inputs=[image_in, audio_in, model_name_in, model_version_name_in, threshold_slider, session_state],
-                outputs=[heatmap_out, overlaid_out, session_state]
-            ).then(
-                fn=lambda: gr.update(interactive=True),  # Enable slider after results
-                outputs=threshold_slider
-            )
-
-            threshold_slider.change(
-                fn=update_threshold,
-                inputs=[threshold_slider, session_state],
-                outputs=heatmap_out
-            )
-
         # ============= VIDEO TAB =============
         with gr.TabItem("Video"):
             gr.Markdown("### Video Input & Examples")
@@ -618,6 +575,44 @@ with gr.Blocks() as demo:
                 fn=update_threshold_video,
                 inputs=[threshold_slider_video, session_state],
                 outputs=v_heatmap_out
+            )
+
+        # ============= IMAGE + AUDIO TAB =============
+        with gr.TabItem("Image + Audio"):
+            with gr.Row():
+                image_in = gr.Image(type='pil', label="Image Input")
+                audio_in = gr.Audio(label="Audio Input")
+
+            btn = gr.Button("Run")
+
+            with gr.Row():
+                heatmap_out = gr.Image(type='pil', label="Heatmap (Grayscale)")
+                overlaid_out = gr.Image(type='pil', label="Overlaid with Original")
+
+            with gr.Row():
+                threshold_slider = gr.Slider(
+                    minimum=0,
+                    maximum=1,
+                    value=0.5,
+                    step=0.01,
+                    label="Threshold",
+                    info="Lower = more sensitive, Higher = less sensitive",
+                    interactive=False
+                )
+
+            btn.click(
+                fn=submit,
+                inputs=[image_in, audio_in, model_name_in, model_version_name_in, threshold_slider, session_state],
+                outputs=[heatmap_out, overlaid_out, session_state]
+            ).then(
+                fn=lambda: gr.update(interactive=True),  # Enable slider after results
+                outputs=threshold_slider
+            )
+
+            threshold_slider.change(
+                fn=update_threshold,
+                inputs=[threshold_slider, session_state],
+                outputs=heatmap_out
             )
 
 
