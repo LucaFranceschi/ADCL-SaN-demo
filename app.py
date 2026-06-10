@@ -189,22 +189,18 @@ def submit(
 
     # simulate batch dimension
     image = image.unsqueeze(0)
-    print(f'{image.shape=}')
 
     sr, audio = audio_file
     audio = torch.Tensor(audio).T
-    print(f'{audio.shape=}')
 
     if sr != SAMPLE_RATE:
         resampler = torchaudio.transforms.Resample(sr, SAMPLE_RATE)
         audio = resampler(audio)
 
     if audio.shape[0] > 1:
-        audio = audio.mean(dim=0)
+        audio = audio.mean(dim=0, keepdim=True)
 
-    # simulate batch dimension
-    audio = audio.unsqueeze(0)
-    print(f'{audio.shape=}', f'sample_rate {sr} --> {SAMPLE_RATE}' if sr != SAMPLE_RATE else '')
+    audio = audio / np.iinfo(np.int16).max
 
     # Get raw segmentation
     seg = forward(image, audio, model_name, model_version, original_resolution)
@@ -507,7 +503,6 @@ def update_versions(model_name):
         choices=choices_versions[model_name],
         value=choices_versions[model_name][0]
     )
-
 
 with gr.Blocks() as demo:
     gr.Markdown("Start typing below and then click **Run** to see the output.")

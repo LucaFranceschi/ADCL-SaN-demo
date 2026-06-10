@@ -6,7 +6,7 @@ model:
 
 pretrain:
   vision_backbone: null
-  audio_backbone: /home/user/app/data/pretrain/BEATs_iter3_plus_AS2M_finetuned_on_AS2M_cpt2.pt
+  audio_backbone: ./data/pretrain/BEATs_iter3_plus_AS2M_finetuned_on_AS2M_cpt2.pt
   audio_proj: null
 
 fga_conf:
