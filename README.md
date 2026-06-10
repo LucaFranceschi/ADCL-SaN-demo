@@ -1,5 +1,5 @@
 ---
-title: Demotest
+title: ACL-SaN and ADCL demo
 emoji: 💻
 colorFrom: gray
 colorTo: blue
