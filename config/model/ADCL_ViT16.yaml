@@ -10,8 +10,7 @@ model:
 
 pretrain:
   vision_backbone: null
-  # audio_backbone: /data/upftfg27/lfranceschi/pretrain/BEATs_iter3_plus_AS2M_finetuned_on_AS2M_cpt2.pt
-  audio_backbone: /home/lfranceschi/repos/ACL-SSL/pretrain/BEATs_iter3_plus_AS2M_finetuned_on_AS2M_cpt2.pt
+  audio_backbone: ./data/pretrain/BEATs_iter3_plus_AS2M_finetuned_on_AS2M_cpt2.pt
   audio_proj: null
 
 fga_conf:

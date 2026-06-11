@@ -26,10 +26,23 @@ INPUT_RESOLUTION = 352
 SAMPLE_RATE = 16000
 
 MODEL_PATH = 'data/pretrain'
-CONFIG_FILE_TEMPLATE = 'config/model/{}_ViT16.yaml'
+CONFIG_FILE_TEMPLATE = 'config/model/{}'
 WEIGHTS_PATH = 'data/models'
 WEIGHTS_SUBPATH = {
-    'baseline': 'ACL_ViT16_test_best_param/Param_best.pth'
+    'baseline': 'ACL_ViT16_test_best_param/Param_best.pth',
+    'ACL-SaN_v1_B16': 'ACL-SaN_v1_B16_E17.pth',
+    'ACL-SaN_v1_B32': 'ACL-SaN_v1_B32_E19.pth',
+    'ACL-SaN_v2_B16': 'ACL-SaN_v2_B16_E16.pth',
+    'ACL-SaN_v3_B16': 'ACL-SaN_v3_B16_E15.pth',
+    'ACL-SaN_v4_B16': 'ACL-SaN_v4_B16_E18.pth',
+    'ACL-SaN_v5_B16': 'ACL-SaN_v5_B16_E16.pth',
+    'ADCL_vA_B16': 'ACL-SaN_v1_B16_E17.pth', # same weights, different pipeline
+    'ADCL_vB_B16': 'ADCL_vB_B16_E18.pth',
+    'ADCL_vC_B16': 'ADCL_vC_B16_E17.pth',
+}
+MODEL_CLASS_NAMES = {
+    'ACL-SaN': 'ACL',
+    'ADCL': 'ADCL'
 }
 
 MEDIA_DIR = 'media'
@@ -62,7 +75,7 @@ class SessionState(_SessionState, total=False):
 
 def create_session() -> SessionState:
     """Create a new session with its own directory"""
-    session_id = str(uuid.uuid4())[:8]
+    session_id = str(uuid.uuid4())
     session_dir = os.path.join(MEDIA_DIR, session_id)
     os.makedirs(session_dir, exist_ok=True)
 
@@ -141,8 +154,8 @@ def forward(
     original_resolution: tuple[int, int]
 ) -> np.ndarray:
     """Perform a forward pass and return the raw segmentation map as numpy array (0-255)"""
-    model = getattr(import_module('modules.models'), model_name)(
-        CONFIG_FILE_TEMPLATE.format(model_name),
+    model = getattr(import_module('modules.models'), MODEL_CLASS_NAMES[model_name])(
+        CONFIG_FILE_TEMPLATE.format(CHOICES_MODELS[model_name]),
         DEVICE,
         MODEL_PATH
     )
@@ -191,7 +204,13 @@ def submit(
     image = image.unsqueeze(0)
 
     sr, audio = audio_file
-    audio = torch.Tensor(audio).T
+    audio = torch.Tensor(audio)
+
+    if audio.ndim == 1:
+        audio = audio.unsqueeze(0)
+
+    if audio.ndim == 2 and audio.shape[0] > audio.shape[1]:
+        audio = audio.T
 
     if sr != SAMPLE_RATE:
         resampler = torchaudio.transforms.Resample(sr, SAMPLE_RATE)
@@ -230,8 +249,8 @@ def forward_video(
     original_resolution: tuple[int, int]
 ) -> np.ndarray:
     """Perform forward pass on video frames"""
-    model = getattr(import_module('modules.models'), model_name)(
-        CONFIG_FILE_TEMPLATE.format(model_name),
+    model = getattr(import_module('modules.models'), MODEL_CLASS_NAMES[model_name])(
+        CONFIG_FILE_TEMPLATE.format(CHOICES_MODELS[model_name]),
         DEVICE,
         MODEL_PATH
     )
@@ -487,15 +506,31 @@ def organize_examples_for_gradio(examples_dict: dict[str, list[str]]) -> list[li
 
 title = "Audio-Grounded Contrastive Learning"
 
-choices_models = ['ACL', 'ADCL']
+CHOICES_MODELS = {
+    'ACL-SaN': 'ACL_ViT16.yaml',
+    'ADCL': 'ADCL_ViT16.yaml'
+}
 choices_versions = {
-    'ACL': [
-        ('Baseline', 'baseline'),
-        ('Retrained baseline', 'v1'),
-        ('SaN', 'v2')
+    'ACL-SaN': [
+        ('ACL-SSL Baseline', 'baseline'),
+        ('ACL-SaN v1', 'ACL-SaN_v1_B16'),
+        ('ACL-SaN v1 (B32)', 'ACL-SaN_v1_B32'),
+        ('ACL-SaN v2', 'ACL-SaN_v2_B16'),
+        ('ACL-SaN v3', 'ACL-SaN_v3_B16'),
+        ('ACL-SaN v4', 'ACL-SaN_v4_B16'),
+        ('ACL-SaN v5', 'ACL-SaN_v5_B16')
+    ],
+    'ADCL': [
+        ('ACL-SSL Baseline', 'baseline'),
+        ('ACL-SaN v1', 'ACL-SaN_v1_B16'),
+        ('ACL-SaN v1 (B32)', 'ACL-SaN_v1_B32'),
+        ('ACL-SaN v2', 'ACL-SaN_v2_B16'),
+        ('ACL-SaN v3', 'ACL-SaN_v3_B16'),
+        ('ACL-SaN v4', 'ACL-SaN_v4_B16'),
+        ('ACL-SaN v5', 'ACL-SaN_v5_B16')
     ]
 }
-choices_models_init = choices_models[0]
+choices_models_init = list(CHOICES_MODELS.keys())[0]
 
 
 def update_versions(model_name):
@@ -512,7 +547,7 @@ with gr.Blocks() as demo:
     demo.load(fn=create_session, outputs=session_state)
 
     with gr.Row():
-        model_name_in = gr.Dropdown(choices=choices_models, label="Model")
+        model_name_in = gr.Dropdown(choices=list(CHOICES_MODELS.keys()), label="Model")
         model_version_name_in = gr.Dropdown(choices=choices_versions[choices_models_init], label="Version")
         model_name_in.change(fn=update_versions, inputs=model_name_in, outputs=model_version_name_in)
 
