@@ -8,7 +8,7 @@ import argparse
 from modules.BEATs.BEATs import BEATs, BEATsConfig
 from modules.AudioToken.embedder import FGAEmbedder
 from modules.CLIPSeg.clipseg_for_audio import CLIPSeg
-from modules.mask_utils import ImageMasker, FeatureMasker
+from modules.mask_utils import ImageMasker, FeatureMasker, TrainableADCLSigmoid
 from transformers import AutoTokenizer
 from torch.utils.checkpoint import checkpoint
 
@@ -221,7 +221,7 @@ class ACL(nn.Module):
         return logits # [B_i, B_e, h, w] or [B, h, w] depending on force_comb or other things
 
     def forward_module_eval(self, image: torch.Tensor, embedding: torch.Tensor, resolution: int = 224,
-                       force_comb: bool = False) -> torch.Tensor:
+                       force_comb: bool = False) -> dict[str, torch.Tensor]:
         '''
         Same spirit as forward_module but returns more things for evaluation purposes.
         '''
@@ -373,23 +373,19 @@ class ACL(nn.Module):
 
         else:
             out_dict = {}
-            seg_logit = self.forward_module(image, pred_emb, resolution)
-            out_dict['positive'] = self.masker_i(seg_logit, infer=True)
+            out_dict['positive'] = self.forward_module_eval(image, pred_emb, resolution)
 
             pred_emb_sil = kwargs.get('pred_emb_silence', None)
             if pred_emb_sil != None:
-                seg_logit = self.forward_module(image, pred_emb_sil.repeat(pred_emb.shape[0], 1), resolution)
-                out_dict['silence'] = self.masker_i(seg_logit, infer=True)
+                out_dict['silence'] = self.forward_module_eval(image, pred_emb_sil.repeat(pred_emb.shape[0], 1), resolution)
 
             pred_emb_noise = kwargs.get('pred_emb_noise', None)
             if pred_emb_noise != None:
-                seg_logit = self.forward_module(image, pred_emb_noise.repeat(pred_emb.shape[0], 1), resolution)
-                out_dict['noise'] = self.masker_i(seg_logit, infer=True)
+                out_dict['noise'] = self.forward_module_eval(image, pred_emb_noise.repeat(pred_emb.shape[0], 1), resolution)
 
             pred_emb_offscreen = kwargs.get('pred_emb_offscreen', None)
             if pred_emb_offscreen != None:
-                seg_logit = self.forward_module(image, pred_emb_offscreen, resolution)
-                out_dict['offscreen'] = self.masker_i(seg_logit, infer=True)
+                out_dict['offscreen'] = self.forward_module_eval(image, pred_emb_offscreen, resolution)
 
         return out_dict
 
@@ -473,8 +469,13 @@ class ADCL(ACL):
     def __init__(self, conf_file, device, model_path):
         super().__init__(conf_file, device, model_path)
 
-        self.m = nn.Sigmoid()
-        # self.temperature = 0.07
+        self.m = TrainableADCLSigmoid(
+            self.args.model.epsilon,
+            self.args.model.epsilon2,
+            self.args.model.tau,
+            self.args.model.trainable_sigmoid
+        )
+        self.m.to(self.device)
 
     def audio_visual_sim(self, v_d: torch.Tensor, embedding: torch.Tensor, resolution: int = 224) -> torch.Tensor:
         """
@@ -537,13 +538,9 @@ class ADCL(ACL):
 
     def encode_masked_vision(self, image: torch.Tensor, embedding: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, float, float]:
         """
-        Heavily inspired by:
-
+        Following procedure in:
         https://github.com/jinxiang-liu/SSL-TIE/blob/c49e6a94e4ed63bba864ba01e9138451ca1cc801/models/model.py#L57
         """
-        tau = self.args.model.tau
-        epsilon = self.args.model.epsilon
-        epsilon2 = self.args.model.epsilon2
         trimap = self.args.model.trimap
 
         B, c, H, W = image.shape
@@ -556,18 +553,18 @@ class ADCL(ACL):
         sim_i_j = self.forward_module(v_d, embedding, H, force_comb=True)  # A0: [B, B, H, W]
         sim_i_j = remove_diagonal(sim_i_j) # [B, B-1, H, W] removed positive (diagonal elements)
 
-        Pos_mask = self.m((sim_i_i - epsilon)/tau)
-        Pos_mask_i_j = self.m((sim_i_j - epsilon)/tau)
+        Pos_mask = self.m(sim_i_i, True)
+        Pos_mask_i_j = self.m(sim_i_j, True)
 
         if trimap:
-            Pos2 = self.m((sim_i_i - epsilon2)/tau)
+            Pos2 = self.m(sim_i_i, False)
             Neg_mask = 1 - Pos2
         else:
             Neg_mask = 1 - Pos_mask
 
-        sim = (Pos_mask * sim_i_i).view(*sim_i_i.shape[:2],-1).sum(-1) / (Pos_mask.view(*Pos_mask.shape[:2],-1).sum(-1))                # easy positives [B, 1]
-        sim1 = (Pos_mask_i_j * sim_i_j).view(*sim_i_j.shape[:2],-1).sum(-1) / (Pos_mask_i_j.view(*Pos_mask_i_j.shape[:2],-1).sum(-1))   # easy negatives [B, B-1]
-        sim2 = (Neg_mask * sim_i_i).view(*sim_i_i.shape[:2],-1).sum(-1) / (Neg_mask.view(*Neg_mask.shape[:2],-1).sum(-1))               # hard negatives [B, 1]
+        sim = (Pos_mask * sim_i_i).view(*sim_i_i.shape[:2],-1).sum(-1) / (Pos_mask.view(*Pos_mask.shape[:2],-1).sum(-1) + 1e-8)                # easy positives [B, 1]
+        sim1 = (Pos_mask_i_j * sim_i_j).view(*sim_i_j.shape[:2],-1).sum(-1) / (Pos_mask_i_j.view(*Pos_mask_i_j.shape[:2],-1).sum(-1) + 1e-8)   # easy negatives [B, B-1]
+        sim2 = (Neg_mask * sim_i_i).view(*sim_i_i.shape[:2],-1).sum(-1) / (Neg_mask.view(*Neg_mask.shape[:2],-1).sum(-1) + 1e-8)               # hard negatives [B, 1]
 
         logits = torch.cat((sim, sim1, sim2), 1) # / self.temperature # done in loss
 
@@ -605,8 +602,62 @@ class ADCL(ACL):
 
         v_d = self.av_grounder.get_pixels(image) # v^D: [B, c, h, w]
         seg_logit = self.forward_module(v_d, pred_emb, resolution)
-        heatmap = self.m((seg_logit - self.args.model.epsilon)/self.args.model.tau)
+        heatmap = self.m(seg_logit, True)
 
         out_dict = {**out_dict, 'heatmap': heatmap}
 
         return out_dict
+
+    def forward_module_eval(self, image: torch.Tensor, embedding: torch.Tensor, resolution: int = 224,
+                       force_comb: bool = False) -> dict[str, torch.Tensor]:
+        B, c, H, W = image.shape
+        v_d = self.av_grounder.get_pixels(image) # v^D: [B, c, h, w]
+
+        # similarity for (soft) positives
+        sim_i_i = self.audio_visual_sim(v_d, embedding, resolution) # A: [B, 1, H, W]
+        Pos_mask = self.m(sim_i_i, True)
+
+        v_d_seg = (sim_i_i + 1) / 2 # rescale to range [0, 1] from [-1, 1]
+
+        return {
+            'v_d_seg': v_d_seg,
+            'm_i_seg': Pos_mask
+        }
+
+    def save(self, model_dir: str):
+        """
+        Save model parameters to a file. (Only trainable parts)
+
+        Args:
+            model_dir (str): Directory to save the model.
+        """
+        ckp = {
+            'audio_proj': self.audio_proj.state_dict(),
+            'masker_i': self.masker_i.state_dict(),
+            'm': self.m.state_dict(),
+        }
+        torch.save(ckp, model_dir)
+
+    def load(self, model_dir: str):
+        """
+        Load model parameters from a file. (Only trainable parts)
+
+        Args:
+            model_dir (str): Directory to load the model from.
+        """
+        ckp = torch.load(model_dir, map_location=self.device)
+        self.audio_proj.load_state_dict(ckp['audio_proj'])
+        self.masker_i.load_state_dict(ckp['masker_i'])
+        try:
+            self.m.load_state_dict(ckp['m'])
+        except Exception as e:
+            self.m = TrainableADCLSigmoid(
+                self.args.model.epsilon,
+                self.args.model.epsilon2,
+                self.args.model.tau,
+                False
+            )
+
+    def train(self, bool: bool = True):
+        super().train(bool)
+        self.m.train(bool)

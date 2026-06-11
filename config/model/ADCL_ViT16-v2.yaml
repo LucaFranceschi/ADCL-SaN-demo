@@ -6,8 +6,8 @@ model:
   trimap : True
   epsilon : 0.65
   epsilon2 : 0.4
-  tau : 0.03
-  trainable_sigmoid: False
+  tau : 0.15
+  trainable_sigmoid: True
 
 pretrain:
   vision_backbone: null

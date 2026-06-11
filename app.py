@@ -155,7 +155,7 @@ def forward(
 ) -> np.ndarray:
     """Perform a forward pass and return the raw segmentation map as numpy array (0-255)"""
     model = getattr(import_module('modules.models'), MODEL_CLASS_NAMES[model_name])(
-        CONFIG_FILE_TEMPLATE.format(CHOICES_MODELS[model_name]),
+        CONFIG_FILE_TEMPLATE.format(CONFIG_NAME[model_version]),
         DEVICE,
         MODEL_PATH
     )
@@ -176,7 +176,10 @@ def forward(
 
     out_dict = model(image.to(DEVICE), resolution=INPUT_RESOLUTION, pred_emb=audio_driven_embedding)
 
-    seg = ((out_dict['positive'].squeeze().cpu().numpy()) * 255).astype(np.uint8)
+    if model_version == 'ADCL_vA_B16':
+        seg = ((out_dict['positive']['v_d_seg'].squeeze().cpu().numpy()) * 255).astype(np.uint8)
+    else:
+        seg = ((out_dict['positive']['m_i_seg'].squeeze().cpu().numpy()) * 255).astype(np.uint8)
 
     return seg
 
@@ -250,7 +253,7 @@ def forward_video(
 ) -> np.ndarray:
     """Perform forward pass on video frames"""
     model = getattr(import_module('modules.models'), MODEL_CLASS_NAMES[model_name])(
-        CONFIG_FILE_TEMPLATE.format(CHOICES_MODELS[model_name]),
+        CONFIG_FILE_TEMPLATE.format(CONFIG_NAME[model_version]),
         DEVICE,
         MODEL_PATH
     )
@@ -277,7 +280,10 @@ def forward_video(
             pred_emb=audio_driven_embedding
         )
 
-        seg = ((out_dict['positive'].squeeze().cpu().numpy()) * 255).astype(np.uint8)
+        if model_version == 'ADCL_vA_B16':
+            seg = ((out_dict['positive']['v_d_seg'].squeeze().cpu().numpy()) * 255).astype(np.uint8)
+        else:
+            seg = ((out_dict['positive']['m_i_seg'].squeeze().cpu().numpy()) * 255).astype(np.uint8)
 
         v_seg.append(seg)
 
@@ -506,11 +512,22 @@ def organize_examples_for_gradio(examples_dict: dict[str, list[str]]) -> list[li
 
 title = "Audio-Grounded Contrastive Learning"
 
-CHOICES_MODELS = {
-    'ACL-SaN': 'ACL_ViT16.yaml',
-    'ADCL': 'ADCL_ViT16.yaml'
+CHOICES_MODELS = ['ACL-SaN', 'ADCL']
+
+CONFIG_NAME = {
+    'baseline': 'ACL_ViT16.yaml',
+    'ACL-SaN_v1_B16': 'ACL_ViT16.yaml',
+    'ACL-SaN_v1_B32': 'ACL_ViT16.yaml',
+    'ACL-SaN_v2_B16': 'ACL_ViT16.yaml',
+    'ACL-SaN_v3_B16': 'ACL_ViT16.yaml',
+    'ACL-SaN_v4_B16': 'ACL_ViT16.yaml',
+    'ACL-SaN_v5_B16': 'ACL_ViT16.yaml',
+    'ADCL_vA_B16': 'ADCL_ViT16.yaml',
+    'ADCL_vB_B16': 'ADCL_ViT16.yaml',
+    'ADCL_vC_B16': 'ADCL_ViT16-v2.yaml',
 }
-choices_versions = {
+
+CHOICES_VERSIONS = {
     'ACL-SaN': [
         ('ACL-SSL Baseline', 'baseline'),
         ('ACL-SaN v1', 'ACL-SaN_v1_B16'),
@@ -522,21 +539,17 @@ choices_versions = {
     ],
     'ADCL': [
         ('ACL-SSL Baseline', 'baseline'),
-        ('ACL-SaN v1', 'ACL-SaN_v1_B16'),
-        ('ACL-SaN v1 (B32)', 'ACL-SaN_v1_B32'),
-        ('ACL-SaN v2', 'ACL-SaN_v2_B16'),
-        ('ACL-SaN v3', 'ACL-SaN_v3_B16'),
-        ('ACL-SaN v4', 'ACL-SaN_v4_B16'),
-        ('ACL-SaN v5', 'ACL-SaN_v5_B16')
+        ('ADCL vA', 'ADCL_vA_B16'),
+        ('ADCL vB', 'ADCL_vB_B16'),
+        ('ADCL vC', 'ADCL_vC_B16'),
     ]
 }
-choices_models_init = list(CHOICES_MODELS.keys())[0]
-
+choices_models_init = CHOICES_MODELS[0]
 
 def update_versions(model_name):
     return gr.Dropdown(
-        choices=choices_versions[model_name],
-        value=choices_versions[model_name][0]
+        choices=CHOICES_VERSIONS[model_name],
+        value=CHOICES_VERSIONS[model_name][0][1]
     )
 
 with gr.Blocks() as demo:
@@ -547,8 +560,12 @@ with gr.Blocks() as demo:
     demo.load(fn=create_session, outputs=session_state)
 
     with gr.Row():
-        model_name_in = gr.Dropdown(choices=list(CHOICES_MODELS.keys()), label="Model")
-        model_version_name_in = gr.Dropdown(choices=choices_versions[choices_models_init], label="Version")
+        model_name_in = gr.Dropdown(choices=CHOICES_MODELS, value=choices_models_init, label="Model")
+        model_version_name_in = gr.Dropdown(
+            choices=CHOICES_VERSIONS[choices_models_init],
+            value=CHOICES_VERSIONS[choices_models_init][0][1],  # 'baseline'
+            label="Version"
+        )
         model_name_in.change(fn=update_versions, inputs=model_name_in, outputs=model_version_name_in)
 
     with gr.Tabs():
