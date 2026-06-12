@@ -148,7 +148,7 @@ def apply_threshold_to_segmentation(seg: np.ndarray, threshold: float) -> np.nda
     return seg_thresholded
 
 
-@gr.cache
+# @gr.cache
 def update_threshold(thr: float, state: SessionState) -> PImage:
     """Update threshold for image segmentation"""
     if 'image_seg' not in state or 'image_resolution' not in state:
@@ -159,7 +159,7 @@ def update_threshold(thr: float, state: SessionState) -> PImage:
     return Image.fromarray(heatmap_mask)
 
 
-@gr.cache
+# @gr.cache
 def update_threshold_video(thr: float, state: SessionState) -> str:
     """Update threshold for video segmentation"""
     if 'video_seg' not in state or \
@@ -531,6 +531,15 @@ def organize_examples_for_gradio(examples_dict: dict[str, list[str]]) -> list[li
     return examples_list
 
 
+def submit_comparison(
+    image_file: PImage,
+    audio_file: tuple[int, np.ndarray],
+    model_name: str,
+    state: SessionState
+) -> tuple[list[PImage], SessionState]:
+    placeholder = [image_file] * (len(CHOICES_VERSIONS[model_name]) * 3)
+    return placeholder, state
+
 # ========================================== APPLICATION ==========================================
 
 title = "Audio-Grounded Contrastive Learning"
@@ -549,6 +558,7 @@ CHOICES_VERSIONS = {
     ],
     'ADCL': [
         ('ACL-SSL Baseline', 'baseline'),
+        ('ACL-SaN v1', 'ACL-SaN_v1_B16'),
         ('ADCL vA', 'ADCL_vA_B16'),
         ('ADCL vB', 'ADCL_vB_B16'),
         ('ADCL vC', 'ADCL_vC_B16'),
@@ -563,100 +573,67 @@ def update_versions(model_name):
     )
 
 with gr.Blocks() as demo:
-    gr.Markdown("Start typing below and then click **Run** to see the output.")
-
     # Initialize session state per client
     session_state = gr.State(delete_callback=cleanup_session)
     demo.load(fn=create_session, outputs=session_state)
 
-    with gr.Row():
-        model_name_in = gr.Dropdown(choices=CHOICES_MODELS, value=choices_models_init, label="Model")
-        model_version_name_in = gr.Dropdown(
-            choices=CHOICES_VERSIONS[choices_models_init],
-            value=CHOICES_VERSIONS[choices_models_init][0][1],  # 'baseline'
-            label="Version"
-        )
-        model_name_in.change(fn=update_versions, inputs=model_name_in, outputs=model_version_name_in)
-
     with gr.Tabs():
-        # ============= VIDEO TAB =============
-        with gr.TabItem("Video"):
-            gr.Markdown("### Video Input & Examples")
-
-            # Load example videos
-            example_videos_dict = load_example_videos()
-            example_videos_count = sum(len(v) for v in example_videos_dict.values())
-
+        with gr.TabItem("Model comparisons"):
             with gr.Row():
-                video_in = gr.Video(label="Video Input")
+                with gr.Column(scale=1):
+                    with gr.Row():
+                        model_name_in_comp = gr.Dropdown(choices=CHOICES_MODELS, value=choices_models_init, label="Model")
 
-            # Display examples if available
-            if example_videos_count > 0:
-                gr.Markdown(f"**Available examples:** {' | '.join([f'{cat} ({len(vids)})' for cat, vids in example_videos_dict.items() if vids])}")
-                example_videos = organize_examples_for_gradio(example_videos_dict)
+                    image_in_comp = gr.Image(type='pil', label="Image Input", height=350)
+                    audio_in_comp = gr.Audio(label="Audio Input")
+                    btn_comp = gr.Button("Run")
+                with gr.Column(scale=4):
+                    comp_gallery_out = gr.Gallery(label=f"Comparison between all {model_name_in_comp.value} models",
+                                                  rows=3,
+                                                  columns=len(CHOICES_VERSIONS[model_name_in_comp.value]),
+                                                  object_fit="fill",
+                                                  height='fit-content')
 
-                if example_videos:
-                    gr.Examples(
-                        examples=example_videos,
-                        inputs=[video_in],
-                        label="Click to load an example video"
-                    )
-
-            btn_video = gr.Button("Run")
-
-            with gr.Row():
-                v_heatmap_out = gr.Video(label="Heatmap (Grayscale)")
-                v_overlaid_out = gr.Video(label="Overlaid with Original")
-
-            with gr.Row():
-                threshold_slider_video = gr.Slider(
-                    minimum=0,
-                    maximum=1,
-                    value=0.5,
-                    step=0.01,
-                    label="Threshold",
-                    info="Lower = more sensitive, Higher = less sensitive",
-                    interactive=False
-                )
-
-            btn_video.click(
-                fn=submit_video,
-                inputs=[video_in, model_name_in, model_version_name_in, threshold_slider_video, session_state],
-                outputs=[v_heatmap_out, v_overlaid_out, session_state]
+            btn_comp.click(
+                fn=submit_comparison,
+                inputs=[image_in_comp, audio_in_comp, model_name_in_comp, session_state],
+                outputs=[comp_gallery_out, session_state]
             ).then(
-                fn=lambda model_version: gr.update(value=Model(model_version).univ_threshold, interactive=True),
-                inputs=[model_version_name_in],
-                outputs=threshold_slider_video
-            )
-
-            threshold_slider_video.change(
-                fn=update_threshold_video,
-                inputs=[threshold_slider_video, session_state],
-                outputs=v_heatmap_out
+                fn=lambda model_name: gr.update(label=f"Comparison between all {model_name} models",
+                                                columns=len(CHOICES_VERSIONS[model_name])),
+                inputs=[model_name_in_comp],
+                outputs=comp_gallery_out
             )
 
         # ============= IMAGE + AUDIO TAB =============
         with gr.TabItem("Image + Audio"):
             with gr.Row():
-                image_in = gr.Image(type='pil', label="Image Input")
-                audio_in = gr.Audio(label="Audio Input")
+                with gr.Column():
+                    with gr.Row():
+                        model_name_in = gr.Dropdown(choices=CHOICES_MODELS, value=choices_models_init, label="Model")
+                        model_version_name_in = gr.Dropdown(
+                            choices=CHOICES_VERSIONS[choices_models_init],
+                            value=CHOICES_VERSIONS[choices_models_init][0][1],  # 'baseline'
+                            label="Version"
+                        )
+                        model_name_in.change(fn=update_versions, inputs=model_name_in, outputs=model_version_name_in)
 
-            btn = gr.Button("Run")
+                    image_in = gr.Image(type='pil', label="Image Input", height=350)
+                    audio_in = gr.Audio(label="Audio Input")
+                    btn = gr.Button("Run")
 
-            with gr.Row():
-                heatmap_out = gr.Image(type='pil', label="Heatmap (Grayscale)")
-                overlaid_out = gr.Image(type='pil', label="Overlaid with Original")
-
-            with gr.Row():
-                threshold_slider = gr.Slider(
-                    minimum=0,
-                    maximum=1,
-                    value=0.5,
-                    step=0.01,
-                    label="Threshold",
-                    info="Lower = more sensitive, Higher = less sensitive",
-                    interactive=False
-                )
+                with gr.Column():
+                    overlaid_out = gr.Image(type='pil', label="Overlaid with Original", height=350)
+                    heatmap_out = gr.Image(type='pil', label="Heatmap (Grayscale)", height=350)
+                    threshold_slider = gr.Slider(
+                        minimum=0,
+                        maximum=1,
+                        value=0.5,
+                        step=0.01,
+                        label="Threshold",
+                        info="Default value is universal threshold",
+                        interactive=False
+                    )
 
             btn.click(
                 fn=submit,
@@ -674,5 +651,64 @@ with gr.Blocks() as demo:
                 outputs=heatmap_out
             )
 
+        # ============= VIDEO TAB =============
+        with gr.TabItem("Video"):
+            # Load example videos
+            example_videos_dict = load_example_videos()
+            example_videos_count = sum(len(v) for v in example_videos_dict.values())
+
+            with gr.Row():
+                with gr.Column():
+                    with gr.Row():
+                        model_name_in_video = gr.Dropdown(choices=CHOICES_MODELS, value=choices_models_init, label="Model")
+                        model_version_name_in_video = gr.Dropdown(
+                            choices=CHOICES_VERSIONS[choices_models_init],
+                            value=CHOICES_VERSIONS[choices_models_init][0][1],  # 'baseline'
+                            label="Version"
+                        )
+                        model_name_in_video.change(fn=update_versions, inputs=model_name_in_video, outputs=model_version_name_in_video)
+
+                    video_in = gr.Video(label="Video Input", height=350)
+                    # Display examples if available
+                    if example_videos_count > 0:
+                        gr.Markdown(f"**Available examples:** {' | '.join([f'{cat} ({len(vids)})' for cat, vids in example_videos_dict.items() if vids])}")
+                        example_videos = organize_examples_for_gradio(example_videos_dict)
+
+                        if example_videos:
+                            gr.Examples(
+                                examples=example_videos,
+                                inputs=[video_in],
+                                label="Click to load an example video",
+                                examples_per_page=5
+                            )
+                    btn_video = gr.Button("Run")
+                with gr.Column():
+                    v_overlaid_out = gr.Video(label="Overlaid with Original", height=350)
+                    v_heatmap_out = gr.Video(label="Heatmap (Grayscale)", height=350)
+                    threshold_slider_video = gr.Slider(
+                        minimum=0,
+                        maximum=1,
+                        value=0.5,
+                        step=0.01,
+                        label="Threshold",
+                        info="Default value is universal threshold",
+                        interactive=False
+                    )
+
+            btn_video.click(
+                fn=submit_video,
+                inputs=[video_in, model_name_in_video, model_version_name_in_video, threshold_slider_video, session_state],
+                outputs=[v_heatmap_out, v_overlaid_out, session_state]
+            ).then(
+                fn=lambda model_version: gr.update(value=Model(model_version).univ_threshold, interactive=True),
+                inputs=[model_version_name_in_video],
+                outputs=threshold_slider_video
+            )
+
+            threshold_slider_video.change(
+                fn=update_threshold_video,
+                inputs=[threshold_slider_video, session_state],
+                outputs=v_heatmap_out
+            )
 
 demo.launch(server_name="0.0.0.0", server_port=7860, debug=True)
