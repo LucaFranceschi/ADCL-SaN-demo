@@ -583,29 +583,43 @@ def submit_comparison(
     audio_file: tuple[int, np.ndarray],
     model_name: str,
     state: SessionState
-) -> tuple[list[PImage], SessionState]:
-    # placeholder = [image_file] * (len(CHOICES_VERSIONS[model_name]) * 3)
-
+) -> tuple[str, SessionState]:
     overlaid_list = []
-    heatmap_mask_list = []
+
     for display_name, model_version in CHOICES_VERSIONS[model_name]:
         model = Model(model_version)
         model.load_model()
         assert(model.univ_threshold != None)
 
-        overlaid_list_tmp = []
-        heatmap_mask_list_tmp = []
-        for audio in [audio_file, 'silence', 'noise']:
-            heatmap_mask, overlaid, state = submit(image_file, audio, model_name, model_version, model.univ_threshold, state)
-            heatmap_mask_list_tmp += [heatmap_mask]
-            overlaid_list_tmp += [overlaid]
+        row = []
 
-        heatmap_mask_list.append(heatmap_mask_list_tmp)
-        overlaid_list.append(overlaid_list_tmp)
+        for audio in [audio_file, "silence", "noise"]:
+            _, overlaid, state = submit(
+                image_file,
+                audio,
+                model_name,
+                model_version,
+                model.univ_threshold,
+                state
+            )
 
-        model.model = None
+            row.append(overlaid)
 
-    return [el for ml in zip(*overlaid_list) for el in ml], state
+        overlaid_list.append(row)
+
+    # Convert images to flat list for HTML helper
+    images = []
+    for row in zip(*overlaid_list):
+        for img in row:
+            images.append(pil_to_base64(img))
+
+    html = images_to_html(
+        images,
+        col_labels=[m[0] for m in CHOICES_VERSIONS[model_name]],
+        row_labels=["Audio", "Silence", "Noise"]
+    )
+
+    return html, state
 
 # ========================================== APPLICATION ==========================================
 
@@ -639,6 +653,51 @@ def update_versions(model_name):
         value=CHOICES_VERSIONS[model_name][0][1]
     )
 
+import base64
+from io import BytesIO
+
+def pil_to_base64(img):
+    buffer = BytesIO()
+    img.save(buffer, format="PNG")
+    encoded = base64.b64encode(buffer.getvalue()).decode()
+    return f"data:image/png;base64,{encoded}"
+
+def images_to_html(images, col_labels, row_labels):
+    html = """
+    <table style="border-collapse: collapse; text-align: center;">
+    """
+
+    html += "<tr><th></th>"
+    for label in col_labels:
+        html += f"<th>{label}</th>"
+    html += "</tr>"
+
+    ncols = len(col_labels)
+
+    for row_idx, row_label in enumerate(row_labels):
+        html += f"<tr><td><b>{row_label}</b></td>"
+
+        for col_idx in range(ncols):
+            img_src = images[row_idx * ncols + col_idx]
+
+            html += f"""
+            <td>
+                <img
+                    src="{img_src}"
+                    style="
+                        max-width:200px;
+                        height:auto;
+                        display:block;
+                    "
+                />
+            </td>
+            """
+
+        html += "</tr>"
+
+    html += "</table>"
+    return html
+
 with gr.Blocks() as demo:
     # Initialize session state per client
     session_state = gr.State(delete_callback=cleanup_session)
@@ -655,21 +714,18 @@ with gr.Blocks() as demo:
                     audio_in_comp = gr.Audio(label="Audio Input")
                     btn_comp = gr.Button("Run")
                 with gr.Column(scale=4):
-                    comp_gallery_out = gr.Gallery(label=f"Comparison between all {model_name_in_comp.value} models",
-                                                  rows=3,
-                                                  columns=len(CHOICES_VERSIONS[model_name_in_comp.value]),
-                                                  object_fit="fill",
-                                                  height='fit-content')
+                    comp_html_out = gr.HTML()
+                    # comp_gallery_out = gr.Gallery(label=f"Comparison between all {model_name_in_comp.value} models",
+                    #                               rows=3,
+                    #                               columns=len(CHOICES_VERSIONS[model_name_in_comp.value]),
+                    #                               object_fit="fill",
+                    #                               height='fit-content')
+
 
             btn_comp.click(
                 fn=submit_comparison,
                 inputs=[image_in_comp, audio_in_comp, model_name_in_comp, session_state],
-                outputs=[comp_gallery_out, session_state]
-            ).then(
-                fn=lambda model_name: gr.update(label=f"Comparison between all {model_name} models",
-                                                columns=len(CHOICES_VERSIONS[model_name])),
-                inputs=[model_name_in_comp],
-                outputs=comp_gallery_out
+                outputs=[comp_html_out, session_state]
             )
 
         # ============= IMAGE + AUDIO TAB =============
