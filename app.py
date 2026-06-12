@@ -19,41 +19,84 @@ from torchvision import transforms as vt
 from utils.util import get_prompt_template
 from utils.viz import draw_overlaid, draw_overlaid_im, draw_heatmap
 
+# ========================================== ENV SETTINGS ==========================================
+
+WEIGHTS_PATH = 'data/models/{}'
+CONFIGS_PATH = 'config/model/{}'
+PT_MODELS_PATH = 'data/pretrain'
+EXAMPLES_PATH = 'data/examples'
+
+USE_CUDA = torch.cuda.is_available()
+DEVICE = torch.device('cuda', torch.cuda.current_device()) if USE_CUDA else torch.device('cpu')
+print(f'Device: {DEVICE} is used\n')
+
+# ========================================= MODEL WRAPPER =========================================
+
+if "MODELS" not in globals():
+    global MODELS
+    MODELS = {}
+
+def cleanup():
+    global MODELS
+    MODELS = {}
+
+def multiton(cls):
+    global MODELS
+    def getinstance(name, *args):
+        if name not in MODELS:
+            MODELS[name] = cls(name, *args)
+        return MODELS[name]
+    return getinstance
+
+@multiton
+class Model:
+    def __init__(
+        self,
+        model_version,
+        display_name: str|None = None,
+        model_classname: str|None = None,
+        weights_path: str|None = None,
+        config_file_path: str|None = None,
+        univ_threshold: float|None = None,
+    ) -> None:
+        self.model_version = model_version
+        self.display_name = display_name
+        self.model_classname = model_classname
+        self.weights_path = WEIGHTS_PATH.format(weights_path)
+        self.config_file_path = CONFIGS_PATH.format(config_file_path)
+        self.univ_threshold = univ_threshold
+
+        self.model = None
+
+    def load_model(self):
+        if self.model == None and self.model_classname and self.config_file_path:
+            print('Loaded model', self.model_version)
+            self.model = getattr(import_module('modules.models'), self.model_classname)(
+                self.config_file_path,
+                DEVICE,
+                PT_MODELS_PATH
+            )
+
+            self.model.load(self.weights_path)
+            self.model.train(False)
+
+Model('baseline', 'ACL-SSL Baseline', 'ACL', 'ACL_ViT16_test_best_param/Param_best.pth', 'ACL_ViT16.yaml', 0.870)
+Model('ACL-SaN_v1_B16', 'ACL-SaN v1', 'ACL', 'ACL-SaN_v1_B16_E17.pth', 'ACL_ViT16.yaml', 0.920)
+Model('ACL-SaN_v1_B32', 'ACL-SaN v1 (B32)', 'ACL', 'ACL-SaN_v1_B32_E19.pth', 'ACL_ViT16.yaml', 0.930)
+Model('ACL-SaN_v2_B16', 'ACL-SaN v2', 'ACL', 'ACL-SaN_v2_B16_E16.pth', 'ACL_ViT16.yaml', 0.883)
+Model('ACL-SaN_v3_B16', 'ACL-SaN v3', 'ACL', 'ACL-SaN_v3_B16_E15.pth', 'ACL_ViT16.yaml', 0.876)
+Model('ACL-SaN_v4_B16', 'ACL-SaN v4', 'ACL', 'ACL-SaN_v4_B16_E18.pth', 'ACL_ViT16.yaml', 0.875)
+Model('ACL-SaN_v5_B16', 'ACL-SaN v5', 'ACL', 'ACL-SaN_v5_B16_E16.pth', 'ACL_ViT16.yaml', 0.613)
+Model('ADCL_vA_B16', 'ADCL vA', 'ADCL', 'ACL-SaN_v1_B16_E17.pth', 'ADCL_ViT16.yaml', 0.642)
+Model('ADCL_vB_B16', 'ADCL vB', 'ADCL', 'ADCL_vB_B16_E18.pth', 'ADCL_ViT16.yaml', 0.384)
+Model('ADCL_vC_B16', 'ADCL vC', 'ADCL', 'ADCL_vC_B16_E17.pth', 'ADCL_ViT16-v2.yaml', 0.842)
 
 # =========================================== CONSTANTS ===========================================
 
 INPUT_RESOLUTION = 352
 SAMPLE_RATE = 16000
-
-MODEL_PATH = 'data/pretrain'
-CONFIG_FILE_TEMPLATE = 'config/model/{}'
-WEIGHTS_PATH = 'data/models'
-WEIGHTS_SUBPATH = {
-    'baseline': 'ACL_ViT16_test_best_param/Param_best.pth',
-    'ACL-SaN_v1_B16': 'ACL-SaN_v1_B16_E17.pth',
-    'ACL-SaN_v1_B32': 'ACL-SaN_v1_B32_E19.pth',
-    'ACL-SaN_v2_B16': 'ACL-SaN_v2_B16_E16.pth',
-    'ACL-SaN_v3_B16': 'ACL-SaN_v3_B16_E15.pth',
-    'ACL-SaN_v4_B16': 'ACL-SaN_v4_B16_E18.pth',
-    'ACL-SaN_v5_B16': 'ACL-SaN_v5_B16_E16.pth',
-    'ADCL_vA_B16': 'ACL-SaN_v1_B16_E17.pth', # same weights, different pipeline
-    'ADCL_vB_B16': 'ADCL_vB_B16_E18.pth',
-    'ADCL_vC_B16': 'ADCL_vC_B16_E17.pth',
-}
-MODEL_CLASS_NAMES = {
-    'ACL-SaN': 'ACL',
-    'ADCL': 'ADCL'
-}
-
-MEDIA_DIR = 'media'
-
-USE_CUDA = torch.cuda.is_available()
-
 PROMPT_TEMPLATE, TEXT_POS_AT_PROMPT, PROMPT_LENGTH = get_prompt_template()
-
-DEVICE = torch.device('cuda', torch.cuda.current_device()) if USE_CUDA else torch.device('cpu')
-print(f'Device: {DEVICE} is used\n')
-
+MEDIA_DIR = 'media'
 
 # ======================================= SESSION MANAGEMENT ======================================
 
@@ -61,7 +104,6 @@ print(f'Device: {DEVICE} is used\n')
 class _SessionState(TypedDict):
     session_id: str
     session_dir: str
-
 
 class SessionState(_SessionState, total=False):
     """Per-session state dictionary"""
@@ -144,28 +186,20 @@ def update_threshold_video(thr: float, state: SessionState) -> str:
     return heatmap_mask
 
 
-@gr.cache
 @torch.no_grad()
 def forward(
     image: torch.Tensor,
     audio: torch.Tensor,
-    model_name: str,
     model_version: str,
     original_resolution: tuple[int, int]
 ) -> np.ndarray:
     """Perform a forward pass and return the raw segmentation map as numpy array (0-255)"""
-    model = getattr(import_module('modules.models'), MODEL_CLASS_NAMES[model_name])(
-        CONFIG_FILE_TEMPLATE.format(CONFIG_NAME[model_version]),
-        DEVICE,
-        MODEL_PATH
-    )
-
-    model.load(os.path.join(WEIGHTS_PATH, WEIGHTS_SUBPATH[model_version]))
-    model.train(False)
+    Model(model_version).load_model() # imports and loads weights if not done before
+    model = Model(model_version).model # get handle of module instance
 
     placeholder_tokens = model.get_placeholder_token(PROMPT_TEMPLATE.replace('{}', ''))
 
-    resolution = min(original_resolution)
+    # resolution = min(original_resolution)
 
     audio_driven_embedding = model.encode_audio(
         audio.to(model.device),
@@ -225,7 +259,7 @@ def submit(
     audio = audio / np.iinfo(np.int16).max
 
     # Get raw segmentation
-    seg = forward(image, audio, model_name, model_version, original_resolution)
+    seg = forward(image, audio, model_version, original_resolution)
 
     # Store in state
     state['image_seg'] = seg
@@ -242,28 +276,20 @@ def submit(
     return heatmap_mask, overlaid, state
 
 
-@gr.cache
 @torch.no_grad()
 def forward_video(
     frames: torch.Tensor,
     audio: torch.Tensor,
-    model_name: str,
     model_version: str,
     original_resolution: tuple[int, int]
 ) -> np.ndarray:
     """Perform forward pass on video frames"""
-    model = getattr(import_module('modules.models'), MODEL_CLASS_NAMES[model_name])(
-        CONFIG_FILE_TEMPLATE.format(CONFIG_NAME[model_version]),
-        DEVICE,
-        MODEL_PATH
-    )
-
-    model.load(os.path.join(WEIGHTS_PATH, WEIGHTS_SUBPATH[model_version]))
-    model.train(False)
+    Model(model_version).load_model() # imports and loads weights if not done before
+    model = Model(model_version).model # get handle of module instance
 
     placeholder_tokens = model.get_placeholder_token(PROMPT_TEMPLATE.replace('{}', ''))
 
-    resolution = min(original_resolution)
+    # resolution = min(original_resolution)
 
     audio_driven_embedding = model.encode_audio(
         audio.to(model.device),
@@ -402,22 +428,20 @@ def submit_video(
     if audio.shape[0] > 1:
         audio = audio.mean(dim=0)
 
-    print(f'{audio.shape=}')
-
     video_file_name = video_file.split('/')[-1]
-    print(video_file_name)
+
     if any(video_file_name.startswith(cat) for cat in ['original', 'silence', 'noise', 'offscreen']):
         likely_output_path = os.path.join(
             'data/examples/v_seg',
-            video_file_name.removesuffix('.mp4') + '_' + '_'.join([model_name, model_version, 'v_seg.npy'])
+            video_file_name.removesuffix('.mp4') + '_' + '_'.join([model_version, 'v_seg.npy'])
         )
         if os.path.exists(likely_output_path):
             v_seg = np.load(likely_output_path)
         else:
-            v_seg = forward_video(frames, audio, model_name, model_version, original_resolution)
+            v_seg = forward_video(frames, audio, model_version, original_resolution)
             np.save(likely_output_path, v_seg)
     else:
-        v_seg = forward_video(frames, audio, model_name, model_version, original_resolution)
+        v_seg = forward_video(frames, audio, model_version, original_resolution)
 
     # Store in state
     state['video_seg'] = v_seg
@@ -434,7 +458,7 @@ def submit_video(
         v_overlaid.append(draw_overlaid(np.array(original_frames[i]), heatmap))
 
         # Apply threshold
-        seg_thresholded = apply_threshold_to_segmentation(seg, threshold)
+        seg_thresholded = apply_threshold_to_segmentation(seg, Model(model_version).univ_threshold)
         v_heatmap_mask.append(draw_heatmap(seg_thresholded, original_resolution))
 
     overlaid = save_video(
@@ -456,7 +480,7 @@ def submit_video(
     return heatmap_mask, overlaid, state
 
 
-# ============================= EXAMPLE VIDEO MANAGEMENT ============================
+# ==================================== EXAMPLE VIDEO MANAGEMENT ===================================
 
 def load_example_videos() -> dict[str, list[str]]:
     """
@@ -471,7 +495,6 @@ def load_example_videos() -> dict[str, list[str]]:
             'Offscreen (Swapped Audio)': [list of paths]
         }
     """
-    examples_dir = 'data/examples'
     examples_map = ['original', 'silence', 'noise', 'offscreen']
 
     examples_dict = {}
@@ -479,9 +502,9 @@ def load_example_videos() -> dict[str, list[str]]:
     for category in examples_map:
         examples_dict[category] = []
 
-        if os.path.exists(examples_dir):
+        if os.path.exists(EXAMPLES_PATH):
             video_files = sorted([
-                os.path.join(examples_dir, f) for f in os.listdir(examples_dir) if f.startswith(category)
+                os.path.join(EXAMPLES_PATH, f) for f in os.listdir(EXAMPLES_PATH) if f.startswith(category)
             ])
             examples_dict[category] = video_files
 
@@ -513,19 +536,6 @@ def organize_examples_for_gradio(examples_dict: dict[str, list[str]]) -> list[li
 title = "Audio-Grounded Contrastive Learning"
 
 CHOICES_MODELS = ['ACL-SaN', 'ADCL']
-
-CONFIG_NAME = {
-    'baseline': 'ACL_ViT16.yaml',
-    'ACL-SaN_v1_B16': 'ACL_ViT16.yaml',
-    'ACL-SaN_v1_B32': 'ACL_ViT16.yaml',
-    'ACL-SaN_v2_B16': 'ACL_ViT16.yaml',
-    'ACL-SaN_v3_B16': 'ACL_ViT16.yaml',
-    'ACL-SaN_v4_B16': 'ACL_ViT16.yaml',
-    'ACL-SaN_v5_B16': 'ACL_ViT16.yaml',
-    'ADCL_vA_B16': 'ADCL_ViT16.yaml',
-    'ADCL_vB_B16': 'ADCL_ViT16.yaml',
-    'ADCL_vC_B16': 'ADCL_ViT16-v2.yaml',
-}
 
 CHOICES_VERSIONS = {
     'ACL-SaN': [
@@ -614,7 +624,8 @@ with gr.Blocks() as demo:
                 inputs=[video_in, model_name_in, model_version_name_in, threshold_slider_video, session_state],
                 outputs=[v_heatmap_out, v_overlaid_out, session_state]
             ).then(
-                fn=lambda: gr.update(interactive=True),  # Enable slider after results
+                fn=lambda model_version: gr.update(value=Model(model_version).univ_threshold, interactive=True),
+                inputs=[model_version_name_in],
                 outputs=threshold_slider_video
             )
 
@@ -652,7 +663,8 @@ with gr.Blocks() as demo:
                 inputs=[image_in, audio_in, model_name_in, model_version_name_in, threshold_slider, session_state],
                 outputs=[heatmap_out, overlaid_out, session_state]
             ).then(
-                fn=lambda: gr.update(interactive=True),  # Enable slider after results
+                fn=lambda model_version: gr.update(value=Model(model_version).univ_threshold, interactive=True),  # Enable slider after results
+                inputs=[model_version_name_in],
                 outputs=threshold_slider
             )
 
