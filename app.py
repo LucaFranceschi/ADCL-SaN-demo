@@ -30,6 +30,13 @@ USE_CUDA = torch.cuda.is_available()
 DEVICE = torch.device('cuda', torch.cuda.current_device()) if USE_CUDA else torch.device('cpu')
 print(f'Device: {DEVICE} is used\n')
 
+# =========================================== CONSTANTS ===========================================
+
+INPUT_RESOLUTION = 352
+SAMPLE_RATE = 16000
+PROMPT_TEMPLATE, TEXT_POS_AT_PROMPT, PROMPT_LENGTH = get_prompt_template()
+MEDIA_DIR = 'media'
+
 # ========================================= MODEL WRAPPER =========================================
 
 if "MODELS" not in globals():
@@ -67,6 +74,8 @@ class Model:
         self.univ_threshold = univ_threshold
 
         self.model = None
+        self.silence_emb = None
+        self.noise_emb = None
 
     def load_model(self):
         if self.model == None and self.model_classname and self.config_file_path:
@@ -80,6 +89,43 @@ class Model:
             self.model.load(self.weights_path)
             self.model.train(False)
 
+    def get_silence_emb(self) -> torch.Tensor:
+        if self.silence_emb == None:
+            assert(self.model != None)
+            placeholder_tokens = self.model.get_placeholder_token(PROMPT_TEMPLATE.replace('{}', ''))
+
+            self.silence_emb = self.model.encode_audio(
+                torch.zeros((1, 3*SAMPLE_RATE)).to(self.model.device),
+                placeholder_tokens,
+                TEXT_POS_AT_PROMPT,
+                PROMPT_LENGTH
+            )
+        return self.silence_emb
+
+    def get_noise_emb(self) -> torch.Tensor:
+        if self.noise_emb == None:
+            assert(self.model != None)
+            placeholder_tokens = self.model.get_placeholder_token(PROMPT_TEMPLATE.replace('{}', ''))
+
+            self.noise_emb = self.model.encode_audio(
+                torch.clip(torch.randn((1, 3*SAMPLE_RATE)), min=-1., max=1.).to(self.model.device),
+                placeholder_tokens,
+                TEXT_POS_AT_PROMPT,
+                PROMPT_LENGTH
+            )
+        return self.noise_emb
+
+    def embed_audio(self, audio) -> torch.Tensor:
+        assert(self.model != None)
+        placeholder_tokens = self.model.get_placeholder_token(PROMPT_TEMPLATE.replace('{}', ''))
+
+        return self.model.encode_audio(
+            audio.to(self.model.device),
+            placeholder_tokens,
+            TEXT_POS_AT_PROMPT,
+            PROMPT_LENGTH
+        )
+
 Model('baseline', 'ACL-SSL Baseline', 'ACL', 'ACL_ViT16_test_best_param/Param_best.pth', 'ACL_ViT16.yaml', 0.870)
 Model('ACL-SaN_v1_B16', 'ACL-SaN v1', 'ACL', 'ACL-SaN_v1_B16_E17.pth', 'ACL_ViT16.yaml', 0.920)
 Model('ACL-SaN_v1_B32', 'ACL-SaN v1 (B32)', 'ACL', 'ACL-SaN_v1_B32_E19.pth', 'ACL_ViT16.yaml', 0.930)
@@ -90,13 +136,6 @@ Model('ACL-SaN_v5_B16', 'ACL-SaN v5', 'ACL', 'ACL-SaN_v5_B16_E16.pth', 'ACL_ViT1
 Model('ADCL_vA_B16', 'ADCL vA', 'ADCL', 'ACL-SaN_v1_B16_E17.pth', 'ADCL_ViT16.yaml', 0.642)
 Model('ADCL_vB_B16', 'ADCL vB', 'ADCL', 'ADCL_vB_B16_E18.pth', 'ADCL_ViT16.yaml', 0.384)
 Model('ADCL_vC_B16', 'ADCL vC', 'ADCL', 'ADCL_vC_B16_E17.pth', 'ADCL_ViT16-v2.yaml', 0.842)
-
-# =========================================== CONSTANTS ===========================================
-
-INPUT_RESOLUTION = 352
-SAMPLE_RATE = 16000
-PROMPT_TEMPLATE, TEXT_POS_AT_PROMPT, PROMPT_LENGTH = get_prompt_template()
-MEDIA_DIR = 'media'
 
 # ======================================= SESSION MANAGEMENT ======================================
 
@@ -189,26 +228,23 @@ def update_threshold_video(thr: float, state: SessionState) -> str:
 @torch.no_grad()
 def forward(
     image: torch.Tensor,
-    audio: torch.Tensor,
+    audio: torch.Tensor | str,
     model_version: str,
-    original_resolution: tuple[int, int]
 ) -> np.ndarray:
     """Perform a forward pass and return the raw segmentation map as numpy array (0-255)"""
-    Model(model_version).load_model() # imports and loads weights if not done before
-    model = Model(model_version).model # get handle of module instance
+    model = Model(model_version)
+    model.load_model() # imports and loads weights if not done before
+    module = model.model # get handle of module instance
+    assert(module != None)
 
-    placeholder_tokens = model.get_placeholder_token(PROMPT_TEMPLATE.replace('{}', ''))
+    if audio == 'silence':
+        audio_driven_embedding = model.get_silence_emb()
+    elif audio == 'noise':
+        audio_driven_embedding = model.get_noise_emb()
+    else:
+        audio_driven_embedding = model.embed_audio(audio)
 
-    # resolution = min(original_resolution)
-
-    audio_driven_embedding = model.encode_audio(
-        audio.to(model.device),
-        placeholder_tokens,
-        TEXT_POS_AT_PROMPT,
-        PROMPT_LENGTH
-    )
-
-    out_dict = model(image.to(DEVICE), resolution=INPUT_RESOLUTION, pred_emb=audio_driven_embedding)
+    out_dict = module(image.to(DEVICE), resolution=INPUT_RESOLUTION, pred_emb=audio_driven_embedding)
 
     if model_version == 'ADCL_vA_B16':
         seg = ((out_dict['positive']['v_d_seg'].squeeze().cpu().numpy()) * 255).astype(np.uint8)
@@ -220,7 +256,7 @@ def forward(
 
 def submit(
     image_file: PImage,
-    audio_file: tuple[int, np.ndarray],
+    audio_file: tuple[int, np.ndarray] | str,
     model_name: str,
     model_version: str,
     threshold: float,
@@ -240,26 +276,35 @@ def submit(
     # simulate batch dimension
     image = image.unsqueeze(0)
 
-    sr, audio = audio_file
-    audio = torch.Tensor(audio)
+    if type(audio_file) == str:
+        audio = audio_file
+        assert(type(audio) == str)
+    else:
+        sr, audio = audio_file
+        assert(type(audio) == np.ndarray)
+        needs_normalization = audio.dtype == np.int16
+        audio = torch.Tensor(audio)
 
-    if audio.ndim == 1:
-        audio = audio.unsqueeze(0)
+        if audio.ndim == 1:
+            audio = audio.unsqueeze(0)
 
-    if audio.ndim == 2 and audio.shape[0] > audio.shape[1]:
-        audio = audio.T
+        if audio.ndim == 2 and audio.shape[0] > audio.shape[1]:
+            audio = audio.T
 
-    if sr != SAMPLE_RATE:
-        resampler = torchaudio.transforms.Resample(sr, SAMPLE_RATE)
-        audio = resampler(audio)
+        if sr != SAMPLE_RATE:
+            resampler = torchaudio.transforms.Resample(cast(int, sr), SAMPLE_RATE)
+            audio = resampler(audio)
 
-    if audio.shape[0] > 1:
-        audio = audio.mean(dim=0, keepdim=True)
+        if audio.shape[0] > 1:
+            audio = audio.mean(dim=0, keepdim=True)
 
-    audio = audio / np.iinfo(np.int16).max
+        # audios can be normalized to -1,1 OR occupy the whole np.int16 range depending on the loading method
+        if needs_normalization:
+            audio = audio / np.iinfo(np.int16).max
+        assert(type(audio) == torch.Tensor)
 
     # Get raw segmentation
-    seg = forward(image, audio, model_version, original_resolution)
+    seg = forward(image, audio, model_version)
 
     # Store in state
     state['image_seg'] = seg
@@ -281,18 +326,17 @@ def forward_video(
     frames: torch.Tensor,
     audio: torch.Tensor,
     model_version: str,
-    original_resolution: tuple[int, int]
 ) -> np.ndarray:
     """Perform forward pass on video frames"""
-    Model(model_version).load_model() # imports and loads weights if not done before
-    model = Model(model_version).model # get handle of module instance
+    model = Model(model_version)
+    model.load_model() # imports and loads weights if not done before
+    module = model.model # get handle of module instance
+    assert(module != None)
 
-    placeholder_tokens = model.get_placeholder_token(PROMPT_TEMPLATE.replace('{}', ''))
+    placeholder_tokens = module.get_placeholder_token(PROMPT_TEMPLATE.replace('{}', ''))
 
-    # resolution = min(original_resolution)
-
-    audio_driven_embedding = model.encode_audio(
-        audio.to(model.device),
+    audio_driven_embedding = module.encode_audio(
+        audio.to(module.device),
         placeholder_tokens,
         TEXT_POS_AT_PROMPT,
         PROMPT_LENGTH
@@ -300,7 +344,7 @@ def forward_video(
 
     v_seg = []
     for i in range(frames.shape[0]):
-        out_dict = model(
+        out_dict = module(
             frames[i].unsqueeze(0).to(DEVICE),
             resolution=INPUT_RESOLUTION,
             pred_emb=audio_driven_embedding
@@ -438,16 +482,19 @@ def submit_video(
         if os.path.exists(likely_output_path):
             v_seg = np.load(likely_output_path)
         else:
-            v_seg = forward_video(frames, audio, model_version, original_resolution)
+            v_seg = forward_video(frames, audio, model_version)
             np.save(likely_output_path, v_seg)
     else:
-        v_seg = forward_video(frames, audio, model_version, original_resolution)
+        v_seg = forward_video(frames, audio, model_version)
 
     # Store in state
     state['video_seg'] = v_seg
     state['video_resolution'] = original_resolution
     state['video_audio_path'] = audio_path
     state['video_fps'] = fps
+
+    model = Model(model_version)
+    assert(model.univ_threshold != None)
 
     # Create overlaid image
     v_overlaid = []
@@ -458,7 +505,7 @@ def submit_video(
         v_overlaid.append(draw_overlaid(np.array(original_frames[i]), heatmap))
 
         # Apply threshold
-        seg_thresholded = apply_threshold_to_segmentation(seg, Model(model_version).univ_threshold)
+        seg_thresholded = apply_threshold_to_segmentation(seg, model.univ_threshold)
         v_heatmap_mask.append(draw_heatmap(seg_thresholded, original_resolution))
 
     overlaid = save_video(
@@ -537,8 +584,28 @@ def submit_comparison(
     model_name: str,
     state: SessionState
 ) -> tuple[list[PImage], SessionState]:
-    placeholder = [image_file] * (len(CHOICES_VERSIONS[model_name]) * 3)
-    return placeholder, state
+    # placeholder = [image_file] * (len(CHOICES_VERSIONS[model_name]) * 3)
+
+    overlaid_list = []
+    heatmap_mask_list = []
+    for display_name, model_version in CHOICES_VERSIONS[model_name]:
+        model = Model(model_version)
+        model.load_model()
+        assert(model.univ_threshold != None)
+
+        overlaid_list_tmp = []
+        heatmap_mask_list_tmp = []
+        for audio in [audio_file, 'silence', 'noise']:
+            heatmap_mask, overlaid, state = submit(image_file, audio, model_name, model_version, model.univ_threshold, state)
+            heatmap_mask_list_tmp += [heatmap_mask]
+            overlaid_list_tmp += [overlaid]
+
+        heatmap_mask_list.append(heatmap_mask_list_tmp)
+        overlaid_list.append(overlaid_list_tmp)
+
+        model.model = None
+
+    return [el for ml in zip(*overlaid_list) for el in ml], state
 
 # ========================================== APPLICATION ==========================================
 
