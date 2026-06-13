@@ -21,7 +21,7 @@ from torchvision import transforms as vt
 from utils.util import get_prompt_template
 from utils.viz import draw_overlaid, draw_overlaid_im, draw_heatmap
 
-from utils.apputils import html_empty_box_for_output, html_output_table, images_to_html
+from utils.apputils import html_empty_box_for_output, html_output_table, images_to_html, root_css
 
 # ========================================== ENV SETTINGS ==========================================
 
@@ -752,7 +752,7 @@ CHOICES_VERSIONS = {
 }
 choices_models_init = CHOICES_MODELS[0]
 
-with gr.Blocks() as demo:
+with gr.Blocks(css=root_css) as demo:
     # Initialize session state per client
     session_state = gr.State(delete_callback=cleanup_session)
     demo.load(fn=create_session, outputs=session_state)
@@ -770,9 +770,16 @@ with gr.Blocks() as demo:
                         )
                     image_in_comp = gr.Image(type='pil', label="Image Input", height=350)
                     audio_in_comp = gr.Audio(label="Audio Input")
-                    btn_comp = gr.Button("Run")
+                    snr_comp = gr.Radio(
+                        choices=[('\u221e', 'inf'), ('20', '20'), ('10', '10'), ('5', '5')],
+                        label="SNR Picker",
+                        value='inf',
+                        elem_classes="equal-radio",
+                        interactive=True
+                    )
 
                 with gr.Column(scale=4):
+                    btn_comp = gr.Button("Run")
                     comp_html_out = gr.HTML(
                         value=html_empty_box_for_output,
                         padding=False,
@@ -840,13 +847,20 @@ with gr.Blocks() as demo:
                         )
                         model_name_in.change(fn=update_versions, inputs=model_name_in, outputs=model_version_name_in)
 
-                    image_in = gr.Image(type='pil', label="Image Input", height=350)
+                    image_in = gr.Image(type='pil', label="Image Input", height=300)
                     audio_in = gr.Audio(label="Audio Input")
-                    btn = gr.Button("Run")
+                    snr = gr.Radio(
+                        choices=[('\u221e', 'inf'), ('20', '20'), ('10', '10'), ('5', '5')],
+                        label="SNR Picker",
+                        value='inf',
+                        elem_classes="equal-radio",
+                        interactive=True
+                    )
 
                 with gr.Column():
-                    overlaid_out = gr.Image(type='pil', label="Overlaid with Original", height=350)
-                    heatmap_out = gr.Image(type='pil', label="Heatmap (Grayscale)", height=350)
+                    btn = gr.Button("Run")
+                    overlaid_out = gr.Image(type='pil', label="Overlaid with Original", height=300)
+                    heatmap_out = gr.Image(type='pil', label="Heatmap (Grayscale)", height=300)
                     with gr.Row():
                         threshold_slider = gr.Slider(
                             minimum=0,
@@ -910,7 +924,7 @@ with gr.Blocks() as demo:
                                 examples=example_videos,
                                 inputs=[video_in],
                                 label="Click to load an example video",
-                                examples_per_page=5
+                                examples_per_page=5,
                             )
                     btn_video = gr.Button("Run")
                 with gr.Column():

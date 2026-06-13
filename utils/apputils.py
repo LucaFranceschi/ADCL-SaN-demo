@@ -1,3 +1,13 @@
+root_css = """
+.equal-radio .wrap {
+    display: flex !important;
+    flex-wrap: wrap;
+}
+.equal-radio .wrap label {
+    flex: 1 1 0 !important;   /* all items grow equally */
+}
+"""
+
 html_output_table = """
     <style>
     .comparison-table,
