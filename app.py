@@ -5,10 +5,12 @@ import cv2
 import subprocess
 import uuid
 import shutil
+import base64
 
 import numpy as np
 import gradio as gr
 
+from io import BytesIO
 from typing import cast, TypedDict
 from PIL import Image
 from PIL.Image import Image as PImage
@@ -584,6 +586,20 @@ def submit_comparison(
     model_name: str,
     state: SessionState
 ) -> tuple[str, SessionState]:
+    # images = []
+    # _tmp = [[image_file] * 3] * len(CHOICES_VERSIONS[model_name])
+    # for row in zip(*_tmp):
+    #     for img in row:
+    #         images.append(pil_to_base64(img))
+
+    # html = images_to_html(
+    #     images,
+    #     col_labels=[m[0] for m in CHOICES_VERSIONS[model_name]],
+    #     row_labels=["Audio", "Silence", "Noise"]
+    # )
+
+    # return html, state
+
     overlaid_list = []
 
     for display_name, model_version in CHOICES_VERSIONS[model_name]:
@@ -647,14 +663,19 @@ CHOICES_VERSIONS = {
 }
 choices_models_init = CHOICES_MODELS[0]
 
+EMPTY_COMPARISON_TABLE = """
+<div style="display:none">
+<table>
+<tr><td>placeholder</td></tr>
+</table>
+</div>
+"""
+
 def update_versions(model_name):
     return gr.Dropdown(
         choices=CHOICES_VERSIONS[model_name],
         value=CHOICES_VERSIONS[model_name][0][1]
     )
-
-import base64
-from io import BytesIO
 
 def pil_to_base64(img):
     buffer = BytesIO()
@@ -663,39 +684,129 @@ def pil_to_base64(img):
     return f"data:image/png;base64,{encoded}"
 
 def images_to_html(images, col_labels, row_labels):
-    html = """
-    <table style="border-collapse: collapse; text-align: center;">
-    """
-
-    html += "<tr><th></th>"
-    for label in col_labels:
-        html += f"<th>{label}</th>"
-    html += "</tr>"
-
     ncols = len(col_labels)
 
+    html = f"""
+    <style>
+    .comparison-table,
+    .comparison-table *,
+    .comparison-table tr,
+    .comparison-table td,
+    .comparison-table th,
+    .comparison-table tbody,
+    .comparison-table thead {{
+        border: 0 !important;
+        outline: none !important;
+        box-shadow: none !important;
+    }}
+
+    .comparison-table {{
+        width: 100% !important;
+        table-layout: fixed !important;
+        border-collapse: collapse !important;
+        border-spacing: 0 !important;
+        font-family: var(--font, ui-sans-serif, system-ui, sans-serif) !important;
+        color: var(--body-text-color) !important;
+    }}
+
+    /* HARD FORCE COLUMN WIDTHS */
+    .comparison-table col.label-col {{
+        width: 24px !important;
+    }}
+
+    .comparison-table th,
+    .comparison-table td {{
+        padding: 2px !important;
+        text-align: center !important;
+        vertical-align: middle !important;
+        border: none !important;
+        line-height: 0 !important;
+    }}
+    .comparison-table th {{
+        font-weight: 600 !important;
+        font-size: 1rem !important;
+        line-height: normal !important;
+        padding-bottom: 6px !important;
+    }}
+
+    /* tiny first column */
+    .comparison-table td.row-label,
+    .comparison-table th.row-label {{
+        width: 24px !important;
+        min-width: 24px !important;
+        max-width: 24px !important;
+        padding: 0 !important;
+        overflow: visible !important;
+    }}
+
+    .row-label-inner {{
+        writing-mode: vertical-rl;
+        transform: rotate(180deg);
+
+        font-weight: 600;
+        white-space: nowrap;
+
+        width: 24px;
+        margin: 0 auto;
+    }}
+
+    .img-container {{
+        width: 100% !important;
+        display: block !important;
+        overflow: hidden !important;
+        border-radius: 12px !important;
+        font-size: 0 !important;
+    }}
+    .img-container img {{
+        width: 100% !important;
+        height: auto !important;
+        max-width: 100% !important;
+        object-fit: fill !important;
+        display: block !important;
+        aspect-ratio: 1 / 1 !important;
+    }}
+    </style>
+
+    <table class="comparison-table">
+
+        <colgroup>
+            <col class="label-col">
+            {"".join("<col>" for _ in range(ncols))}
+        </colgroup>
+
+        <thead>
+            <tr>
+                <th class="row-label"></th>
+    """
+
+    for label in col_labels:
+        html += f"<th>{label}</th>"
+
+    html += "</tr></thead><tbody>"
+
     for row_idx, row_label in enumerate(row_labels):
-        html += f"<tr><td><b>{row_label}</b></td>"
+        html += f"""
+        <tr>
+            <td class="row-label">
+                <div class="row-label-inner">{row_label}</div>
+            </td>
+        """
 
         for col_idx in range(ncols):
             img_src = images[row_idx * ncols + col_idx]
 
             html += f"""
             <td>
-                <img
-                    src="{img_src}"
-                    style="
-                        max-width:200px;
-                        height:auto;
-                        display:block;
-                    "
-                />
+                <div class="img-container">
+                    <img src="{img_src}">
+                </div>
             </td>
             """
 
         html += "</tr>"
 
-    html += "</table>"
+    html += "</tbody></table>"
+
     return html
 
 with gr.Blocks() as demo:
@@ -714,13 +825,7 @@ with gr.Blocks() as demo:
                     audio_in_comp = gr.Audio(label="Audio Input")
                     btn_comp = gr.Button("Run")
                 with gr.Column(scale=4):
-                    comp_html_out = gr.HTML()
-                    # comp_gallery_out = gr.Gallery(label=f"Comparison between all {model_name_in_comp.value} models",
-                    #                               rows=3,
-                    #                               columns=len(CHOICES_VERSIONS[model_name_in_comp.value]),
-                    #                               object_fit="fill",
-                    #                               height='fit-content')
-
+                    comp_html_out = gr.HTML(value='<div style="height:20% !important;opacity:0 !important"></div>')
 
             btn_comp.click(
                 fn=submit_comparison,
