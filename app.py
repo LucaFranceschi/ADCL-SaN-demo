@@ -91,6 +91,11 @@ class Model:
             self.model.load(self.weights_path)
             self.model.train(False)
 
+    def offload_model(self):
+        if self.model != None:
+            del self.model
+            self.model = None
+
     def get_silence_emb(self) -> torch.Tensor:
         if self.silence_emb == None:
             assert(self.model != None)
@@ -145,6 +150,8 @@ Model('ADCL_vC_B16', 'ADCL vC', 'ADCL', 'ADCL_vC_B16_E17.pth', 'ADCL_ViT16-v2.ya
 class _SessionState(TypedDict):
     session_id: str
     session_dir: str
+    comparison_segs: list[np.ndarray]
+    comparison_models: list[str]
 
 class SessionState(_SessionState, total=False):
     """Per-session state dictionary"""
@@ -154,6 +161,7 @@ class SessionState(_SessionState, total=False):
     video_resolution: tuple[int, int]
     video_audio_path: str
     video_fps: int
+    comparison_resolution: tuple[int, int]
 
 
 def create_session() -> SessionState:
@@ -166,7 +174,9 @@ def create_session() -> SessionState:
 
     return SessionState(
         session_id=session_id,
-        session_dir=session_dir
+        session_dir=session_dir,
+        comparison_segs=[],
+        comparison_models=[]
     )
 
 
@@ -183,7 +193,7 @@ def cleanup_session(state: SessionState) -> None:
 
 # =========================================== FUNCTIONS ===========================================
 
-def apply_threshold_to_segmentation(seg: np.ndarray, threshold: float) -> np.ndarray:
+def apply_threshold_to_segmentation(seg: np.ndarray, threshold: float, model='') -> np.ndarray:
     """Apply threshold to segmentation map"""
     seg_thresholded = np.where(seg >= threshold*255, 255, 0).astype(np.uint8)
     return seg_thresholded
@@ -262,7 +272,8 @@ def submit(
     model_name: str,
     model_version: str,
     threshold: float,
-    state: SessionState
+    state: SessionState,
+    comparison_flag: bool = False
 ) -> tuple[PImage, PImage, SessionState]:
     """Submit image + audio and return heatmap and overlaid visualization"""
     original_resolution = image_file.size
@@ -309,8 +320,12 @@ def submit(
     seg = forward(image, audio, model_version)
 
     # Store in state
-    state['image_seg'] = seg
-    state['image_resolution'] = original_resolution
+    if not comparison_flag:
+        state['image_seg'] = seg
+        state['image_resolution'] = original_resolution
+    else:
+        state['comparison_segs'].append(seg)
+        state['comparison_resolution'] = original_resolution
 
     # Create overlaid image
     heatmap = draw_heatmap(seg, original_resolution)
@@ -579,63 +594,87 @@ def organize_examples_for_gradio(examples_dict: dict[str, list[str]]) -> list[li
 
     return examples_list
 
+def update_comparison_type(image_file: PImage, output_type: str, state: SessionState) -> str:
+    if 'comparison_segs' not in state or 'comparison_resolution' not in state or 'comparison_models' not in state:
+        return gr.skip() # type: ignore
+
+    if output_type == 'Overlaid':
+        grid = []
+        for i in range(len(state['comparison_segs'])):
+            heatmap = draw_heatmap(state['comparison_segs'][i], state['comparison_resolution'])
+            overlaid = draw_overlaid_im(image_file, Image.fromarray(heatmap))
+            grid.append(overlaid)
+
+        col_names = [Model(model).display_name for model in state['comparison_models']]
+        col_names = cast(list[str], col_names)
+        return _render_comparison_html(grid, col_names)
+    else:
+        return update_comparison_threshold(output_type, state)
+
+def update_comparison_threshold(output_type: str, state: SessionState) -> str:
+    """Update threshold for image segmentation"""
+    if 'comparison_segs' not in state or 'comparison_resolution' not in state or 'comparison_models' not in state or output_type == 'Overlaid':
+        return gr.skip() # type: ignore
+
+    grid = []
+    for i in range(len(state['comparison_segs'])):
+        seg_thresholded = apply_threshold_to_segmentation(state['comparison_segs'][i], Model(state['comparison_models'][i//3]).univ_threshold) #type:ignore
+        heatmap_mask = draw_heatmap(seg_thresholded, state['comparison_resolution'])
+        grid.append(Image.fromarray(heatmap_mask))
+
+    col_names = [Model(model).display_name for model in state['comparison_models']]
+    col_names = cast(list[str], col_names)
+    return _render_comparison_html(grid, col_names)
+
 
 def submit_comparison(
     image_file: PImage,
     audio_file: tuple[int, np.ndarray],
     model_name: str,
+    output_type: str,
     state: SessionState
 ) -> tuple[str, SessionState]:
-    # images = []
-    # _tmp = [[image_file] * 3] * len(CHOICES_VERSIONS[model_name])
-    # for row in zip(*_tmp):
-    #     for img in row:
-    #         images.append(pil_to_base64(img))
 
-    # html = images_to_html(
-    #     images,
-    #     col_labels=[m[0] for m in CHOICES_VERSIONS[model_name]],
-    #     row_labels=["Audio", "Silence", "Noise"]
-    # )
-
-    # return html, state
+    state['comparison_segs'] = []
+    state['comparison_models'] = []
 
     overlaid_list = []
+    seg_masks_list = []
+    col_labels = []
+    comparison_models = []
+    thresholds = []
+
+    original_resolution = image_file.size
 
     for display_name, model_version in CHOICES_VERSIONS[model_name]:
         model = Model(model_version)
         model.load_model()
         assert(model.univ_threshold != None)
 
-        row = []
+        col_labels.append(display_name)
+        comparison_models.append(model_version)
+        thresholds.append(model.univ_threshold)
 
         for audio in [audio_file, "silence", "noise"]:
-            _, overlaid, state = submit(
-                image_file,
-                audio,
-                model_name,
-                model_version,
-                model.univ_threshold,
-                state
+            mask, overlaid, state = submit(
+                image_file, audio, model_name, model_version,
+                model.univ_threshold, state, True
             )
+            overlaid_list.append(overlaid)
+            seg_masks_list.append(mask)
 
-            row.append(overlaid)
+        model.offload_model()
 
-        overlaid_list.append(row)
+    state['comparison_resolution'] = original_resolution
+    state['comparison_models'] = comparison_models
 
-    # Convert images to flat list for HTML helper
-    images = []
-    for row in zip(*overlaid_list):
-        for img in row:
-            images.append(pil_to_base64(img))
+    grid = overlaid_list if output_type == "Overlaid" else seg_masks_list
+    return _render_comparison_html(grid, col_labels), state
 
-    html = images_to_html(
-        images,
-        col_labels=[m[0] for m in CHOICES_VERSIONS[model_name]],
-        row_labels=["Audio", "Silence", "Noise"]
-    )
-
-    return html, state
+def _render_comparison_html(grid: list[PImage], col_labels: list[str]) -> str:
+    row_labels = ["Audio", "Silence", "Noise"]
+    images = [pil_to_base64(im) for im in grid]
+    return images_to_html(images, col_labels=col_labels, row_labels=row_labels)
 
 # ========================================== APPLICATION ==========================================
 
@@ -684,8 +723,6 @@ def pil_to_base64(img):
     return f"data:image/png;base64,{encoded}"
 
 def images_to_html(images, col_labels, row_labels):
-    ncols = len(col_labels)
-
     html = f"""
     <style>
     .comparison-table,
@@ -771,7 +808,7 @@ def images_to_html(images, col_labels, row_labels):
 
         <colgroup>
             <col class="label-col">
-            {"".join("<col>" for _ in range(ncols))}
+            {"".join("<col>" for _ in range(len(col_labels)))}
         </colgroup>
 
         <thead>
@@ -792,8 +829,8 @@ def images_to_html(images, col_labels, row_labels):
             </td>
         """
 
-        for col_idx in range(ncols):
-            img_src = images[row_idx * ncols + col_idx]
+        for col_idx in range(len(col_labels)):
+            img_src = images[col_idx * len(row_labels) + row_idx]
 
             html += f"""
             <td>
@@ -820,17 +857,30 @@ with gr.Blocks() as demo:
                 with gr.Column(scale=1):
                     with gr.Row():
                         model_name_in_comp = gr.Dropdown(choices=CHOICES_MODELS, value=choices_models_init, label="Model")
-
+                        output_type_toggle = gr.Dropdown(
+                            choices=["Overlaid", "Segmentation Mask"],
+                            value="Overlaid",
+                            label="Output type"
+                        )
                     image_in_comp = gr.Image(type='pil', label="Image Input", height=350)
                     audio_in_comp = gr.Audio(label="Audio Input")
                     btn_comp = gr.Button("Run")
+
                 with gr.Column(scale=4):
-                    comp_html_out = gr.HTML(value='<div style="height:20% !important;opacity:0 !important"></div>')
+                    comp_html_out = gr.HTML(
+                        value='<div style="height:20% !important;opacity:0 !important"></div>'
+                    )
 
             btn_comp.click(
                 fn=submit_comparison,
-                inputs=[image_in_comp, audio_in_comp, model_name_in_comp, session_state],
+                inputs=[image_in_comp, audio_in_comp, model_name_in_comp,
+                        output_type_toggle, session_state],
                 outputs=[comp_html_out, session_state]
+            )
+            output_type_toggle.change(
+                fn=update_comparison_type,
+                inputs=[image_in_comp, output_type_toggle, session_state],
+                outputs=comp_html_out
             )
 
         # ============= IMAGE + AUDIO TAB =============
