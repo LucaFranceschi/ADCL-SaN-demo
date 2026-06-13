@@ -846,15 +846,24 @@ with gr.Blocks() as demo:
                 with gr.Column():
                     overlaid_out = gr.Image(type='pil', label="Overlaid with Original", height=350)
                     heatmap_out = gr.Image(type='pil', label="Heatmap (Grayscale)", height=350)
-                    threshold_slider = gr.Slider(
-                        minimum=0,
-                        maximum=1,
-                        value=0.5,
-                        step=0.01,
-                        label="Threshold",
-                        info="Default value is universal threshold",
-                        interactive=False
-                    )
+                    with gr.Row():
+                        threshold_slider = gr.Slider(
+                            minimum=0,
+                            maximum=1,
+                            value=0.5,
+                            step=0.01,
+                            label="Threshold",
+                            info="Default value is universal threshold",
+                            interactive=False,
+                            scale=4
+                        )
+                        dropdown_thresh = gr.Dropdown(
+                            choices=[('Universal Thresh.', 'univ_thresh'), ('Custom Thresh.', "custom")],
+                            value="univ_thresh",
+                            label="Choose Threshold",
+                            interactive=False,
+                            scale=1
+                        )
 
             btn.click(
                 fn=submit,
@@ -906,15 +915,24 @@ with gr.Blocks() as demo:
                 with gr.Column():
                     v_overlaid_out = gr.Video(label="Overlaid with Original", height=350)
                     v_heatmap_out = gr.Video(label="Heatmap (Grayscale)", height=350)
-                    threshold_slider_video = gr.Slider(
-                        minimum=0,
-                        maximum=1,
-                        value=0.5,
-                        step=0.01,
-                        label="Threshold",
-                        info="Default value is universal threshold",
-                        interactive=False
-                    )
+                    with gr.Row():
+                        threshold_slider_video = gr.Slider(
+                            minimum=0,
+                            maximum=1,
+                            value=0.5,
+                            step=0.01,
+                            label="Threshold",
+                            info="Default value is universal threshold",
+                            interactive=False,
+                            scale=4
+                        )
+                        dropdown_thresh_video = gr.Dropdown(
+                            choices=[('Universal Thresh.', 'univ_thresh'), ('Custom Thresh.', "custom")],
+                            value="univ_thresh",
+                            label="Choose Threshold",
+                            interactive=False,
+                            scale=1
+                        )
 
             btn_video.click(
                 fn=submit_video,
