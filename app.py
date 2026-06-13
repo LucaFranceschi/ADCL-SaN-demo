@@ -21,6 +21,8 @@ from torchvision import transforms as vt
 from utils.util import get_prompt_template
 from utils.viz import draw_overlaid, draw_overlaid_im, draw_heatmap
 
+from utils.apputils import html_empty_box_for_output, html_output_table, images_to_html
+
 # ========================================== ENV SETTINGS ==========================================
 
 WEIGHTS_PATH = 'data/models/{}'
@@ -195,7 +197,7 @@ def cleanup_session(state: SessionState) -> None:
 
 def apply_threshold_to_segmentation(seg: np.ndarray, threshold: float, model='') -> np.ndarray:
     """Apply threshold to segmentation map"""
-    seg_thresholded = np.where(seg >= threshold*255, 255, 0).astype(np.uint8)
+    seg_thresholded = np.where(seg >= threshold*255, 0, 255).astype(np.uint8)
     return seg_thresholded
 
 
@@ -594,7 +596,13 @@ def organize_examples_for_gradio(examples_dict: dict[str, list[str]]) -> list[li
 
     return examples_list
 
-def update_comparison_type(image_file: PImage, output_type: str, state: SessionState) -> str:
+def update_comparison_type(
+    image_file: PImage,
+    output_type: str,
+    thresh_type: str,
+    thresh_value: float,
+    state: SessionState
+) -> tuple[str, dict, dict]:
     if 'comparison_segs' not in state or 'comparison_resolution' not in state or 'comparison_models' not in state:
         return gr.skip() # type: ignore
 
@@ -607,18 +615,30 @@ def update_comparison_type(image_file: PImage, output_type: str, state: SessionS
 
         col_names = [Model(model).display_name for model in state['comparison_models']]
         col_names = cast(list[str], col_names)
-        return _render_comparison_html(grid, col_names)
+        return _render_comparison_html(grid, col_names), gr.update(interactive=False), gr.update(interactive=False)
     else:
-        return update_comparison_threshold(output_type, state)
+        return update_comparison_threshold(output_type, thresh_type, thresh_value, state), gr.update(interactive=True), gr.update(interactive=True)
 
-def update_comparison_threshold(output_type: str, state: SessionState) -> str:
+def update_comparison_threshold(
+    output_type: str,
+    thresh_type: str,
+    thresh_value: float,
+    state: SessionState
+) -> str:
     """Update threshold for image segmentation"""
     if 'comparison_segs' not in state or 'comparison_resolution' not in state or 'comparison_models' not in state or output_type == 'Overlaid':
         return gr.skip() # type: ignore
 
     grid = []
     for i in range(len(state['comparison_segs'])):
-        seg_thresholded = apply_threshold_to_segmentation(state['comparison_segs'][i], Model(state['comparison_models'][i//3]).univ_threshold) #type:ignore
+        used_thresh = None
+        if thresh_type == 'custom':
+            used_thresh = thresh_value
+        else:
+            used_thresh = eval(f'Model(state["comparison_models"][i//3]).{thresh_type}')
+            assert(used_thresh != None)
+
+        seg_thresholded = apply_threshold_to_segmentation(state['comparison_segs'][i], used_thresh) #type:ignore
         heatmap_mask = draw_heatmap(seg_thresholded, state['comparison_resolution'])
         grid.append(Image.fromarray(heatmap_mask))
 
@@ -632,6 +652,8 @@ def submit_comparison(
     audio_file: tuple[int, np.ndarray],
     model_name: str,
     output_type: str,
+    thresh_type: str,
+    thresh_value: float,
     state: SessionState
 ) -> tuple[str, SessionState]:
 
@@ -642,28 +664,31 @@ def submit_comparison(
     seg_masks_list = []
     col_labels = []
     comparison_models = []
-    thresholds = []
 
     original_resolution = image_file.size
 
     for display_name, model_version in CHOICES_VERSIONS[model_name]:
         model = Model(model_version)
         model.load_model()
-        assert(model.univ_threshold != None)
+        used_thresh = None
+        if thresh_type == 'custom':
+            used_thresh = thresh_value
+        else:
+            used_thresh = eval(f'model.{thresh_type}')
+            assert(used_thresh != None)
 
         col_labels.append(display_name)
         comparison_models.append(model_version)
-        thresholds.append(model.univ_threshold)
 
         for audio in [audio_file, "silence", "noise"]:
             mask, overlaid, state = submit(
                 image_file, audio, model_name, model_version,
-                model.univ_threshold, state, True
+                used_thresh, state, True
             )
             overlaid_list.append(overlaid)
             seg_masks_list.append(mask)
 
-        model.offload_model()
+        model.offload_model() # TODO: REMOVE BEFORE FINAL RELEASE
 
     state['comparison_resolution'] = original_resolution
     state['comparison_models'] = comparison_models
@@ -677,6 +702,28 @@ def _render_comparison_html(grid: list[PImage], col_labels: list[str]) -> str:
     return images_to_html(images, col_labels=col_labels, row_labels=row_labels)
 
 # ========================================== APPLICATION ==========================================
+
+def update_versions(model_name):
+    return gr.Dropdown(
+        choices=CHOICES_VERSIONS[model_name],
+        value=CHOICES_VERSIONS[model_name][0][1]
+    )
+
+def pil_to_base64(img):
+    buffer = BytesIO()
+    img.save(buffer, format="PNG")
+    encoded = base64.b64encode(buffer.getvalue()).decode()
+    return f"data:image/png;base64,{encoded}"
+
+def on_slider_change(value):
+    """When slider is touched, set dropdown to 'custom'."""
+    return "custom"
+
+def on_dropdown_change(choice, model_version, current_slider):
+    """When dropdown changes, update slider if 'univ_threshold' is selected."""
+    if choice == "univ_threshold":
+        return gr.update(value=Model(model_version).univ_threshold)
+    return current_slider
 
 title = "Audio-Grounded Contrastive Learning"
 
@@ -702,150 +749,6 @@ CHOICES_VERSIONS = {
 }
 choices_models_init = CHOICES_MODELS[0]
 
-EMPTY_COMPARISON_TABLE = """
-<div style="display:none">
-<table>
-<tr><td>placeholder</td></tr>
-</table>
-</div>
-"""
-
-def update_versions(model_name):
-    return gr.Dropdown(
-        choices=CHOICES_VERSIONS[model_name],
-        value=CHOICES_VERSIONS[model_name][0][1]
-    )
-
-def pil_to_base64(img):
-    buffer = BytesIO()
-    img.save(buffer, format="PNG")
-    encoded = base64.b64encode(buffer.getvalue()).decode()
-    return f"data:image/png;base64,{encoded}"
-
-def images_to_html(images, col_labels, row_labels):
-    html = f"""
-    <style>
-    .comparison-table,
-    .comparison-table *,
-    .comparison-table tr,
-    .comparison-table td,
-    .comparison-table th,
-    .comparison-table tbody,
-    .comparison-table thead {{
-        border: 0 !important;
-        outline: none !important;
-        box-shadow: none !important;
-    }}
-
-    .comparison-table {{
-        width: 100% !important;
-        table-layout: fixed !important;
-        border-collapse: collapse !important;
-        border-spacing: 0 !important;
-        font-family: var(--font, ui-sans-serif, system-ui, sans-serif) !important;
-        color: var(--body-text-color) !important;
-    }}
-
-    /* HARD FORCE COLUMN WIDTHS */
-    .comparison-table col.label-col {{
-        width: 24px !important;
-    }}
-
-    .comparison-table th,
-    .comparison-table td {{
-        padding: 2px !important;
-        text-align: center !important;
-        vertical-align: middle !important;
-        border: none !important;
-        line-height: 0 !important;
-    }}
-    .comparison-table th {{
-        font-weight: 600 !important;
-        font-size: 1rem !important;
-        line-height: normal !important;
-        padding-bottom: 6px !important;
-    }}
-
-    /* tiny first column */
-    .comparison-table td.row-label,
-    .comparison-table th.row-label {{
-        width: 24px !important;
-        min-width: 24px !important;
-        max-width: 24px !important;
-        padding: 0 !important;
-        overflow: visible !important;
-    }}
-
-    .row-label-inner {{
-        writing-mode: vertical-rl;
-        transform: rotate(180deg);
-
-        font-weight: 600;
-        white-space: nowrap;
-
-        width: 24px;
-        margin: 0 auto;
-    }}
-
-    .img-container {{
-        width: 100% !important;
-        display: block !important;
-        overflow: hidden !important;
-        border-radius: 12px !important;
-        font-size: 0 !important;
-    }}
-    .img-container img {{
-        width: 100% !important;
-        height: auto !important;
-        max-width: 100% !important;
-        object-fit: fill !important;
-        display: block !important;
-        aspect-ratio: 1 / 1 !important;
-    }}
-    </style>
-
-    <table class="comparison-table">
-
-        <colgroup>
-            <col class="label-col">
-            {"".join("<col>" for _ in range(len(col_labels)))}
-        </colgroup>
-
-        <thead>
-            <tr>
-                <th class="row-label"></th>
-    """
-
-    for label in col_labels:
-        html += f"<th>{label}</th>"
-
-    html += "</tr></thead><tbody>"
-
-    for row_idx, row_label in enumerate(row_labels):
-        html += f"""
-        <tr>
-            <td class="row-label">
-                <div class="row-label-inner">{row_label}</div>
-            </td>
-        """
-
-        for col_idx in range(len(col_labels)):
-            img_src = images[col_idx * len(row_labels) + row_idx]
-
-            html += f"""
-            <td>
-                <div class="img-container">
-                    <img src="{img_src}">
-                </div>
-            </td>
-            """
-
-        html += "</tr>"
-
-    html += "</tbody></table>"
-
-    return html
-
 with gr.Blocks() as demo:
     # Initialize session state per client
     session_state = gr.State(delete_callback=cleanup_session)
@@ -868,19 +771,54 @@ with gr.Blocks() as demo:
 
                 with gr.Column(scale=4):
                     comp_html_out = gr.HTML(
-                        value='<div style="height:20% !important;opacity:0 !important"></div>'
+                        value=html_empty_box_for_output,
+                        padding=False
+                    )
+                    with gr.Row():
+                        threshold_slider_comp = gr.Slider(
+                            minimum=0,
+                            maximum=1,
+                            value=0.5,
+                            step=0.01,
+                            label="Threshold",
+                            info="Default value is universal threshold",
+                            interactive=False
+                        )
+                        dropdown_thresh_comp = gr.Dropdown(
+                            choices=["univ_threshold", "custom"],
+                            value="univ_threshold",
+                            label="Mode",
+                            interactive=False
+                        )
+
+                    threshold_slider_comp.change(
+                        fn=update_comparison_threshold,
+                        inputs=[threshold_slider_comp, dropdown_thresh_comp, threshold_slider_comp, session_state],
+                        outputs=[comp_html_out],
+                    )
+
+                    threshold_slider_comp.release(
+                        fn=on_slider_change,
+                        inputs=[threshold_slider_comp],
+                        outputs=[dropdown_thresh_comp],
+                    )
+
+                    dropdown_thresh_comp.change(
+                        fn=update_comparison_threshold,
+                        inputs=[threshold_slider_comp, dropdown_thresh_comp, threshold_slider_comp, session_state],
+                        outputs=[comp_html_out],
                     )
 
             btn_comp.click(
                 fn=submit_comparison,
                 inputs=[image_in_comp, audio_in_comp, model_name_in_comp,
-                        output_type_toggle, session_state],
+                        output_type_toggle, dropdown_thresh_comp, threshold_slider_comp, session_state],
                 outputs=[comp_html_out, session_state]
             )
             output_type_toggle.change(
                 fn=update_comparison_type,
-                inputs=[image_in_comp, output_type_toggle, session_state],
-                outputs=comp_html_out
+                inputs=[image_in_comp, output_type_toggle, dropdown_thresh_comp, threshold_slider_comp, session_state],
+                outputs=[comp_html_out, threshold_slider_comp, dropdown_thresh_comp]
             )
 
         # ============= IMAGE + AUDIO TAB =============
