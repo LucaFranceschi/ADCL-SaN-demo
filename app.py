@@ -776,7 +776,8 @@ with gr.Blocks() as demo:
                     comp_html_out = gr.HTML(
                         value=html_empty_box_for_output,
                         padding=False,
-                        elem_id='custom_table_comp'
+                        elem_id='custom_table_comp',
+                        container=True
                     )
                     with gr.Row():
                         threshold_slider_comp = gr.Slider(
