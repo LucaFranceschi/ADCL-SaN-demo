@@ -68,14 +68,14 @@ class Model:
         model_classname: str|None = None,
         weights_path: str|None = None,
         config_file_path: str|None = None,
-        univ_threshold: float|None = None,
+        univ_thresh: float|None = None,
     ) -> None:
         self.model_version = model_version
         self.display_name = display_name
         self.model_classname = model_classname
         self.weights_path = WEIGHTS_PATH.format(weights_path)
         self.config_file_path = CONFIGS_PATH.format(config_file_path)
-        self.univ_threshold = univ_threshold
+        self.univ_thresh = univ_thresh
 
         self.model = None
         self.silence_emb = None
@@ -513,7 +513,7 @@ def submit_video(
     state['video_fps'] = fps
 
     model = Model(model_version)
-    assert(model.univ_threshold != None)
+    assert(model.univ_thresh != None)
 
     # Create overlaid image
     v_overlaid = []
@@ -524,7 +524,7 @@ def submit_video(
         v_overlaid.append(draw_overlaid(np.array(original_frames[i]), heatmap))
 
         # Apply threshold
-        seg_thresholded = apply_threshold_to_segmentation(seg, model.univ_threshold)
+        seg_thresholded = apply_threshold_to_segmentation(seg, model.univ_thresh)
         v_heatmap_mask.append(draw_heatmap(seg_thresholded, original_resolution))
 
     overlaid = save_video(
@@ -654,7 +654,8 @@ def submit_comparison(
     output_type: str,
     thresh_type: str,
     thresh_value: float,
-    state: SessionState
+    state: SessionState,
+    progress=gr.Progress()
 ) -> tuple[str, SessionState]:
 
     state['comparison_segs'] = []
@@ -666,6 +667,9 @@ def submit_comparison(
     comparison_models = []
 
     original_resolution = image_file.size
+
+    total_steps = len(CHOICES_VERSIONS[model_name])*3
+    step = 0
 
     for display_name, model_version in CHOICES_VERSIONS[model_name]:
         model = Model(model_version)
@@ -681,15 +685,18 @@ def submit_comparison(
         comparison_models.append(model_version)
 
         for audio in [audio_file, "silence", "noise"]:
+            progress(step / total_steps, desc=f"Running {display_name}...")
             mask, overlaid, state = submit(
                 image_file, audio, model_name, model_version,
                 used_thresh, state, True
             )
             overlaid_list.append(overlaid)
             seg_masks_list.append(mask)
+            step += 1
 
         model.offload_model() # TODO: REMOVE BEFORE FINAL RELEASE
 
+    progress(1.0, desc="Done!")
     state['comparison_resolution'] = original_resolution
     state['comparison_models'] = comparison_models
 
@@ -715,14 +722,10 @@ def pil_to_base64(img):
     encoded = base64.b64encode(buffer.getvalue()).decode()
     return f"data:image/png;base64,{encoded}"
 
-def on_slider_change(value):
-    """When slider is touched, set dropdown to 'custom'."""
-    return "custom"
-
 def on_dropdown_change(choice, model_version, current_slider):
-    """When dropdown changes, update slider if 'univ_threshold' is selected."""
-    if choice == "univ_threshold":
-        return gr.update(value=Model(model_version).univ_threshold)
+    """When dropdown changes, update slider if 'univ_thresh' is selected."""
+    if choice == "univ_thresh":
+        return gr.update(value=Model(model_version).univ_thresh)
     return current_slider
 
 title = "Audio-Grounded Contrastive Learning"
@@ -772,7 +775,8 @@ with gr.Blocks() as demo:
                 with gr.Column(scale=4):
                     comp_html_out = gr.HTML(
                         value=html_empty_box_for_output,
-                        padding=False
+                        padding=False,
+                        elem_id='custom_table_comp'
                     )
                     with gr.Row():
                         threshold_slider_comp = gr.Slider(
@@ -782,13 +786,15 @@ with gr.Blocks() as demo:
                             step=0.01,
                             label="Threshold",
                             info="Default value is universal threshold",
-                            interactive=False
+                            interactive=False,
+                            scale=4
                         )
                         dropdown_thresh_comp = gr.Dropdown(
-                            choices=["univ_threshold", "custom"],
-                            value="univ_threshold",
-                            label="Mode",
-                            interactive=False
+                            choices=[('Universal Thresh.', 'univ_thresh'), ('Custom Thresh.', "custom")],
+                            value="univ_thresh",
+                            label="Choose Threshold",
+                            interactive=False,
+                            scale=1
                         )
 
                     threshold_slider_comp.change(
@@ -798,8 +804,7 @@ with gr.Blocks() as demo:
                     )
 
                     threshold_slider_comp.release(
-                        fn=on_slider_change,
-                        inputs=[threshold_slider_comp],
+                        fn=lambda: 'custom',
                         outputs=[dropdown_thresh_comp],
                     )
 
@@ -856,7 +861,7 @@ with gr.Blocks() as demo:
                 inputs=[image_in, audio_in, model_name_in, model_version_name_in, threshold_slider, session_state],
                 outputs=[heatmap_out, overlaid_out, session_state]
             ).then(
-                fn=lambda model_version: gr.update(value=Model(model_version).univ_threshold, interactive=True),  # Enable slider after results
+                fn=lambda model_version: gr.update(value=Model(model_version).univ_thresh, interactive=True),  # Enable slider after results
                 inputs=[model_version_name_in],
                 outputs=threshold_slider
             )
@@ -916,7 +921,7 @@ with gr.Blocks() as demo:
                 inputs=[video_in, model_name_in_video, model_version_name_in_video, threshold_slider_video, session_state],
                 outputs=[v_heatmap_out, v_overlaid_out, session_state]
             ).then(
-                fn=lambda model_version: gr.update(value=Model(model_version).univ_threshold, interactive=True),
+                fn=lambda model_version: gr.update(value=Model(model_version).univ_thresh, interactive=True),
                 inputs=[model_version_name_in_video],
                 outputs=threshold_slider_video
             )
@@ -927,4 +932,17 @@ with gr.Blocks() as demo:
                 outputs=v_heatmap_out
             )
 
+import httpx
+import gradio.route_utils as ru  # or wherever gradio creates its client
+
+original_client = httpx.AsyncClient
+
+class TimeoutlessClient(httpx.AsyncClient):
+    def __init__(self, *args, **kwargs):
+        kwargs.setdefault("timeout", httpx.Timeout(None))  # no timeout
+        super().__init__(*args, **kwargs)
+
+httpx.AsyncClient = TimeoutlessClient
+
+demo.queue(default_concurrency_limit=2)
 demo.launch(server_name="0.0.0.0", server_port=7860, debug=True)
