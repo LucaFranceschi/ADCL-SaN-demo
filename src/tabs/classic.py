@@ -8,6 +8,7 @@ from PIL import Image
 from PIL.Image import Image as PImage
 from torchvision import transforms as vt
 from typing import cast
+from gradio import skip
 
 from ..model import Model
 from ..constants import *
@@ -117,12 +118,25 @@ def submit(
     return heatmap_mask, overlaid, state
 
 # @gr.cache
-def update_threshold(thr: float, state: SessionState) -> PImage:
+def update_threshold(
+    thresh_type: str,
+    thresh_value: float,
+    model_version: str,
+    state: SessionState
+) -> PImage:
     """Update threshold for image segmentation"""
     if 'image_seg' not in state or 'image_resolution' not in state:
-        return gr.skip() # type: ignore
+        return skip() # type: ignore
 
-    seg_thresholded = apply_threshold_to_segmentation(state['image_seg'], thr)
+    used_threshold = 0.5
+    if thresh_type == 'custom':
+        used_threshold = thresh_value
+    elif thresh_type == 'top50p':
+        used_threshold = cast(float, np.median(state['image_seg']))
+    elif hasattr(Model(model_version), thresh_type):
+        used_threshold = getattr(Model(model_version), thresh_type)
+
+    seg_thresholded = apply_threshold_to_segmentation(state['image_seg'], used_threshold)
     heatmap_mask = draw_heatmap(seg_thresholded, state['image_resolution'])
     return Image.fromarray(heatmap_mask)
 

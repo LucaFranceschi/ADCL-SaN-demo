@@ -9,7 +9,7 @@ from PIL import Image
 from PIL.Image import Image as PImage
 from torchvision import transforms as vt
 from typing import cast
-from gradio import Progress
+from gradio import Progress, skip
 
 from ..model import Model
 from ..constants import *
@@ -234,20 +234,31 @@ def submit_video(
     return heatmap_mask, overlaid, state
 
 # @gr.cache
-def update_threshold_video(thr: float, state: SessionState) -> str:
+def update_threshold_video(
+    thresh_type: str,
+    thresh_value: float,
+    model_version: str,
+    state: SessionState
+) -> str:
     """Update threshold for video segmentation"""
     if 'video_seg' not in state or \
         'video_resolution' not in state or \
         'video_audio_path' not in state or \
         'video_fps' not in state:
-        return gr.skip() # type: ignore
+        return skip() # type: ignore
 
-    seg_thresholded = apply_threshold_to_segmentation(state['video_seg'], thr)
+    used_threshold = 0.5
+    if thresh_type == 'custom':
+        used_threshold = thresh_value
+    elif hasattr(Model(model_version), thresh_type):
+        used_threshold = getattr(Model(model_version), thresh_type)
 
     v_heatmap_mask = []
-    for i in range(seg_thresholded.shape[0]):
-        v_seg = seg_thresholded[i]
-        v_heatmap_mask.append(draw_heatmap(v_seg, state['video_resolution']))
+    for i in range(state['video_seg'].shape[0]):
+        if thresh_type == 'top50p':
+            used_threshold = cast(float, np.median(state['video_seg'][i]))
+        seg_thresholded = apply_threshold_to_segmentation(state['video_seg'][i], used_threshold)
+        v_heatmap_mask.append(draw_heatmap(seg_thresholded, state['video_resolution']))
 
     heatmap_mask = save_video(
         v_heatmap_mask,

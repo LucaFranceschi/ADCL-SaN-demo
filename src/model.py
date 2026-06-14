@@ -160,3 +160,7 @@ class Model:
             TEXT_POS_AT_PROMPT,
             PROMPT_LENGTH
         )
+
+# Instantiate all models from the registry
+for key, cfg in MODEL_REGISTRY.items():
+    Model(key, **{k: v for k, v in cfg.items()})

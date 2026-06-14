@@ -31,7 +31,7 @@ PROMPT_TEMPLATE, TEXT_POS_AT_PROMPT, PROMPT_LENGTH = get_prompt_template()
 
 # =========================================== FUNCTIONS ============================================
 
-def apply_threshold_to_segmentation(seg: np.ndarray, threshold: float, model='') -> np.ndarray:
+def apply_threshold_to_segmentation(seg: np.ndarray, threshold: float) -> np.ndarray:
     """Apply threshold to segmentation map"""
     seg_thresholded = np.where(seg >= threshold*255, 0, 255).astype(np.uint8)
     return seg_thresholded

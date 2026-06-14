@@ -22,25 +22,23 @@ httpx.AsyncClient = TimeoutlessClient
 
 # ==================================== SIMPLE ENOUGH CALLBACKS =====================================
 
-def update_versions(model_name):
+def update_versions(model_name: str):
     return gr.Dropdown(
         choices=CHOICES_VERSIONS[model_name],
         value=CHOICES_VERSIONS[model_name][0][1]
     )
 
-def on_dropdown_change(choice, model_version, current_slider):
-    """When dropdown changes, update slider if 'univ_thresh' is selected."""
-    if choice == "univ_thresh":
-        return gr.update(value=Model(model_version).univ_thresh)
-    return current_slider
+def on_dropdown_change(thresh_choice: str, model_version: str):
+    if hasattr(Model(model_version), thresh_choice):
+        return gr.update(value=getattr(Model(model_version), thresh_choice))
+    return gr.skip()
+
+def on_shown_output(model_version):
+    return gr.update(value=Model(model_version).univ_thresh, interactive=True), gr.update(interactive=True)
 
 # ========================================== APPLICATION ===========================================
 
 CHOICES_MODELS = ['ACL-SaN', 'ADCL']
-
-# Instantiate all models from the registry
-for key, cfg in MODEL_REGISTRY.items():
-    Model(key, **{k: v for k, v in cfg.items()})
 
 # Build CHOICES_VERSIONS from the registry
 CHOICES_VERSIONS = {}
@@ -128,7 +126,7 @@ with gr.Blocks(css=root_css, title=title) as demo:
 
                     threshold_slider_comp.change(
                         fn=update_comparison_threshold,
-                        inputs=[threshold_slider_comp, dropdown_thresh_comp, threshold_slider_comp, session_state],
+                        inputs=[output_type_toggle, dropdown_thresh_comp, threshold_slider_comp, session_state],
                         outputs=[comp_html_out],
                     )
 
@@ -139,7 +137,7 @@ with gr.Blocks(css=root_css, title=title) as demo:
 
                     dropdown_thresh_comp.change(
                         fn=update_comparison_threshold,
-                        inputs=[threshold_slider_comp, dropdown_thresh_comp, threshold_slider_comp, session_state],
+                        inputs=[output_type_toggle, dropdown_thresh_comp, threshold_slider_comp, session_state],
                         outputs=[comp_html_out],
                     )
 
@@ -156,7 +154,7 @@ with gr.Blocks(css=root_css, title=title) as demo:
             )
 
         # ============= IMAGE + AUDIO TAB =============
-        with gr.TabItem("Image + Audio"):
+        with gr.TabItem("Classic"):
             with gr.Row():
                 with gr.Column():
                     with gr.Row():
@@ -222,20 +220,37 @@ with gr.Blocks(css=root_css, title=title) as demo:
                             scale=1
                         )
 
+                    threshold_slider.change(
+                        fn=update_threshold,
+                        inputs=[dropdown_thresh, threshold_slider, model_version_name_in, session_state],
+                        outputs=heatmap_out,
+                    )
+
+                    threshold_slider.release(
+                        fn=lambda: 'custom',
+                        outputs=[dropdown_thresh],
+                    )
+
+                    dropdown_thresh.change(
+                        fn=on_dropdown_change,
+                        inputs=[dropdown_thresh, model_version_name_in],
+                        outputs=threshold_slider
+                    )
+
+                    dropdown_thresh.change(
+                        fn=update_threshold,
+                        inputs=[dropdown_thresh, threshold_slider, model_version_name_in, session_state],
+                        outputs=heatmap_out,
+                    )
+
             btn.click(
                 fn=submit,
                 inputs=[image_in, audio_in, model_name_in, model_version_name_in, threshold_slider, session_state],
                 outputs=[heatmap_out, overlaid_out, session_state]
             ).then(
-                fn=lambda model_version: gr.update(value=Model(model_version).univ_thresh, interactive=True),
-                inputs=[model_version_name_in],
-                outputs=threshold_slider
-            )
-
-            threshold_slider.change(
-                fn=update_threshold,
-                inputs=[threshold_slider, session_state],
-                outputs=heatmap_out
+                fn=on_shown_output,
+                inputs=model_version_name_in,
+                outputs=[threshold_slider, dropdown_thresh]
             )
 
         # ============= VIDEO TAB =============
@@ -296,20 +311,37 @@ with gr.Blocks(css=root_css, title=title) as demo:
                             scale=1
                         )
 
+                    threshold_slider_video.change(
+                        fn=update_threshold_video,
+                        inputs=[dropdown_thresh_video, threshold_slider_video, model_version_name_in_video, session_state],
+                        outputs=v_heatmap_out,
+                    )
+
+                    threshold_slider_video.release(
+                        fn=lambda: 'custom',
+                        outputs=[dropdown_thresh_video],
+                    )
+
+                    dropdown_thresh_video.change(
+                        fn=on_dropdown_change,
+                        inputs=[dropdown_thresh_video, model_version_name_in_video],
+                        outputs=threshold_slider_video
+                    )
+
+                    dropdown_thresh_video.change(
+                        fn=update_threshold_video,
+                        inputs=[dropdown_thresh_video, threshold_slider_video, model_version_name_in_video, session_state],
+                        outputs=v_heatmap_out,
+                    )
+
             btn_video.click(
                 fn=submit_video,
                 inputs=[video_in, model_name_in_video, model_version_name_in_video, threshold_slider_video, session_state],
                 outputs=[v_heatmap_out, v_overlaid_out, session_state]
             ).then(
-                fn=lambda model_version: gr.update(value=Model(model_version).univ_thresh, interactive=True),
-                inputs=[model_version_name_in_video],
-                outputs=threshold_slider_video
-            )
-
-            threshold_slider_video.change(
-                fn=update_threshold_video,
-                inputs=[threshold_slider_video, session_state],
-                outputs=v_heatmap_out
+                fn=on_shown_output,
+                inputs=model_version_name_in_video,
+                outputs=[threshold_slider_video, dropdown_thresh_video]
             )
 
 # init app

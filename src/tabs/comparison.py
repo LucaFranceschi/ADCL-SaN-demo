@@ -57,14 +57,16 @@ def update_comparison_threshold(
     if 'comparison_segs' not in state or 'comparison_resolution' not in state or 'comparison_models' not in state or output_type == 'Overlaid':
         return gr.skip() # type: ignore
 
+    used_thresh = 0.5
+    if thresh_type == 'custom':
+        used_thresh = thresh_value
+
     grid = []
     for i in range(len(state['comparison_segs'])):
-        used_thresh = None
-        if thresh_type == 'custom':
-            used_thresh = thresh_value
-        else:
-            used_thresh = eval(f'Model(state["comparison_models"][i//3]).{thresh_type}')
-            assert(used_thresh != None)
+        if thresh_type == 'top50p':
+            used_thresh = cast(float, np.median(state['comparison_segs'][i]))
+        elif hasattr(Model(state["comparison_models"][i//3]), thresh_type):
+            used_thresh = getattr(Model(state["comparison_models"][i//3]), thresh_type)
 
         seg_thresholded = apply_threshold_to_segmentation(state['comparison_segs'][i], used_thresh) #type:ignore
         heatmap_mask = draw_heatmap(seg_thresholded, state['comparison_resolution'])
@@ -104,12 +106,7 @@ def submit_comparison(
     for display_name, model_version in model_version_choices:
         model = Model(model_version)
         model.load_model()
-        used_thresh = None
-        if thresh_type == 'custom':
-            used_thresh = thresh_value
-        else:
-            used_thresh = eval(f'model.{thresh_type}')
-            assert(used_thresh != None)
+        used_thresh = getattr(model, thresh_type)
 
         col_labels.append(display_name)
         comparison_models.append(model_version)
