@@ -131,7 +131,7 @@ def submit_comparison(
     return _render_comparison_html(grid, col_labels), state
 
 def _render_comparison_html(grid: list[PImage], col_labels: list[str]) -> str:
-    row_labels = ["Audio", "Silence", "Noise"]
+    row_labels = ["Original", "Silence", "Noise"]
     images = [pil_to_base64(im) for im in grid]
     return images_to_html(images, col_labels=col_labels, row_labels=row_labels)
 
