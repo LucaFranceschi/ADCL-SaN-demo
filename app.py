@@ -21,14 +21,21 @@ from torchvision import transforms as vt
 from utils.util import get_prompt_template
 from utils.viz import draw_overlaid, draw_overlaid_im, draw_heatmap
 
-from utils.apputils import html_empty_box_for_output, html_output_table, images_to_html, root_css
+from utils.apputils import html_empty_box_for_output, images_to_html, root_css
 
 # ========================================== ENV SETTINGS ==========================================
 
 WEIGHTS_PATH = 'data/models/{}'
 CONFIGS_PATH = 'config/model/{}'
 PT_MODELS_PATH = 'data/pretrain'
-EXAMPLES_PATH = 'data/examples'
+VIDEO_EXAMPLES_PATH = 'data/examples/videos'
+FRAMES_EXAMPLES_PATH = 'data/examples/frames'
+AUDIOS_EXAMPLES_PATH = 'data/examples/audios'
+
+EXAMPLES = {
+    'BNfeHeas6hA_000076': 'roar',
+    'ixscoaWEEnQ_000104': 'chew',
+}
 
 USE_CUDA = torch.cuda.is_available()
 DEVICE = torch.device('cuda', torch.cuda.current_device()) if USE_CUDA else torch.device('cpu')
@@ -495,7 +502,8 @@ def submit_video(
 
     if any(video_file_name.startswith(cat) for cat in ['original', 'silence', 'noise', 'offscreen']):
         likely_output_path = os.path.join(
-            'data/examples/v_seg',
+            VIDEO_EXAMPLES_PATH,
+            'v_seg',
             video_file_name.removesuffix('.mp4') + '_' + '_'.join([model_version, 'v_seg.npy'])
         )
         if os.path.exists(likely_output_path):
@@ -568,9 +576,9 @@ def load_example_videos() -> dict[str, list[str]]:
     for category in examples_map:
         examples_dict[category] = []
 
-        if os.path.exists(EXAMPLES_PATH):
+        if os.path.exists(VIDEO_EXAMPLES_PATH):
             video_files = sorted([
-                os.path.join(EXAMPLES_PATH, f) for f in os.listdir(EXAMPLES_PATH) if f.startswith(category)
+                os.path.join(VIDEO_EXAMPLES_PATH, f) for f in os.listdir(VIDEO_EXAMPLES_PATH) if f.startswith(category)
             ])
             examples_dict[category] = video_files
 
@@ -710,6 +718,18 @@ def _render_comparison_html(grid: list[PImage], col_labels: list[str]) -> str:
 
 # ========================================== APPLICATION ==========================================
 
+def load_example_frames() -> list[str]:
+    if os.path.exists(FRAMES_EXAMPLES_PATH):
+        return sorted([
+            os.path.join(FRAMES_EXAMPLES_PATH, f) for f in os.listdir(FRAMES_EXAMPLES_PATH)
+        ])
+    return []
+
+def load_example_audio() -> list[str]:
+    if os.path.exists(AUDIOS_EXAMPLES_PATH):
+        return [os.path.join(AUDIOS_EXAMPLES_PATH, f) for f in ['bassoon.wav', 'roar.wav', 'chew.wav', 'silence.wav', 'noise.wav']]
+    return []
+
 def update_versions(model_name):
     return gr.Dropdown(
         choices=CHOICES_VERSIONS[model_name],
@@ -768,8 +788,30 @@ with gr.Blocks(css=root_css) as demo:
                             value="Overlaid",
                             label="Output type"
                         )
-                    image_in_comp = gr.Image(type='pil', label="Image Input", height=350)
-                    audio_in_comp = gr.Audio(label="Audio Input")
+                    with gr.Row():
+                        image_in_comp = gr.Image(type='pil', label="Image Input", height=300)
+                        image_in_comp.unrender()
+                        with gr.Column(scale=1):
+                            gr.Examples(
+                                examples=load_example_frames(),
+                                inputs=[image_in_comp],
+                                label="Click to load an example frame",
+                                examples_per_page=5,
+                            )
+                        with gr.Column(scale=10):
+                            image_in_comp.render()
+                    with gr.Row():
+                        audio_in_comp = gr.Audio(label="Audio Input")
+                        audio_in_comp.unrender()
+                        with gr.Column(scale=1):
+                            gr.Examples(
+                                examples=load_example_audio(),
+                                inputs=[audio_in_comp],
+                                label="Click to load an audio",
+                                examples_per_page=5,
+                            )
+                        with gr.Column(scale=10):
+                            audio_in_comp.render()
                     snr_comp = gr.Radio(
                         choices=[('\u221e', 'inf'), ('20', '20'), ('10', '10'), ('5', '5')],
                         label="SNR Picker",
@@ -778,7 +820,7 @@ with gr.Blocks(css=root_css) as demo:
                         interactive=True
                     )
 
-                with gr.Column(scale=4):
+                with gr.Column(scale=3):
                     btn_comp = gr.Button("Run")
                     comp_html_out = gr.HTML(
                         value=html_empty_box_for_output,
@@ -846,9 +888,30 @@ with gr.Blocks(css=root_css) as demo:
                             label="Version"
                         )
                         model_name_in.change(fn=update_versions, inputs=model_name_in, outputs=model_version_name_in)
-
-                    image_in = gr.Image(type='pil', label="Image Input", height=300)
-                    audio_in = gr.Audio(label="Audio Input")
+                    with gr.Row():
+                        image_in = gr.Image(type='pil', label="Image Input", height=300)
+                        image_in.unrender()
+                        with gr.Column(scale=1):
+                            gr.Examples(
+                                examples=load_example_frames(),
+                                inputs=[image_in],
+                                label="Click to load an example frame",
+                                examples_per_page=5,
+                            )
+                        with gr.Column(scale=10):
+                            image_in.render()
+                    with gr.Row():
+                        audio_in = gr.Audio(label="Audio Input")
+                        audio_in.unrender()
+                        with gr.Column(scale=1):
+                            gr.Examples(
+                                examples=load_example_audio(),
+                                inputs=[audio_in],
+                                label="Click to load an audio",
+                                examples_per_page=5,
+                            )
+                        with gr.Column(scale=10):
+                            audio_in.render()
                     snr = gr.Radio(
                         choices=[('\u221e', 'inf'), ('20', '20'), ('10', '10'), ('5', '5')],
                         label="SNR Picker",
@@ -913,7 +976,7 @@ with gr.Blocks(css=root_css) as demo:
                         )
                         model_name_in_video.change(fn=update_versions, inputs=model_name_in_video, outputs=model_version_name_in_video)
 
-                    video_in = gr.Video(label="Video Input", height=350)
+                    video_in = gr.Video(label="Video Input", height=300)
                     # Display examples if available
                     if example_videos_count > 0:
                         gr.Markdown(f"**Available examples:** {' | '.join([f'{cat} ({len(vids)})' for cat, vids in example_videos_dict.items() if vids])}")
@@ -926,10 +989,10 @@ with gr.Blocks(css=root_css) as demo:
                                 label="Click to load an example video",
                                 examples_per_page=5,
                             )
-                    btn_video = gr.Button("Run")
                 with gr.Column():
-                    v_overlaid_out = gr.Video(label="Overlaid with Original", height=350)
-                    v_heatmap_out = gr.Video(label="Heatmap (Grayscale)", height=350)
+                    btn_video = gr.Button("Run")
+                    v_overlaid_out = gr.Video(label="Overlaid with Original", height=300)
+                    v_heatmap_out = gr.Video(label="Heatmap (Grayscale)", height=300)
                     with gr.Row():
                         threshold_slider_video = gr.Slider(
                             minimum=0,

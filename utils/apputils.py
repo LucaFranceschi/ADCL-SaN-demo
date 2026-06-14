@@ -6,6 +6,20 @@ root_css = """
 .equal-radio .wrap label {
     flex: 1 1 0 !important;   /* all items grow equally */
 }
+
+#component-12, #component-17, #component-38, #component-43 {
+    min-width: 100px !important;
+    max-width: 101px !important;
+    flex-grow: 0 !important;
+    flex-shrink: 1 !important;
+}
+
+.gallery img {
+  height: 70px !important;
+  width: 80px !important;
+  object-fit: cover; /* or "cover" to crop instead */
+}
+
 """
 
 html_output_table = """
