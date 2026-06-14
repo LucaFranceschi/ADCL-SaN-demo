@@ -3,7 +3,7 @@ import gradio as gr
 from src.front_utils import html_empty_box_for_output, root_css
 from src.model import Model, MODEL_REGISTRY
 from src.session import create_session, cleanup_session
-from src.tabs.classic import load_example_frames, load_example_audio, submit, update_threshold
+from src.tabs.classic import load_example_frames, load_example_audio, submit, update_threshold, apply_snr
 from src.tabs.video import load_example_videos, organize_examples_for_gradio, submit_video, update_threshold_video
 from src.tabs.comparison import submit_comparison, update_comparison_threshold, update_comparison_type
 
@@ -95,6 +95,12 @@ with gr.Blocks(css=root_css, title=title) as demo:
                         value='inf',
                         elem_classes="equal-radio",
                         interactive=True
+                    )
+
+                    snr_comp.change(
+                        fn=apply_snr,
+                        inputs=[audio_in_comp, snr_comp],
+                        outputs=[audio_in_comp]
                     )
 
                 with gr.Column(scale=3):
@@ -195,6 +201,12 @@ with gr.Blocks(css=root_css, title=title) as demo:
                         value='inf',
                         elem_classes="equal-radio",
                         interactive=True
+                    )
+
+                    snr.change(
+                        fn=apply_snr,
+                        inputs=[audio_in, snr],
+                        outputs=[audio_in]
                     )
 
                 with gr.Column():

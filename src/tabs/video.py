@@ -11,7 +11,7 @@ from torchvision import transforms as vt
 from typing import cast
 from gradio import Progress, skip
 
-from ..model import Model
+from ..model import Model, load_audio, add_noise
 from ..constants import *
 from ..session import SessionState
 
@@ -161,17 +161,7 @@ def submit_video(
         print(f"FFmpeg error: {e.stderr.decode()}")
         raise
 
-    # Load extracted audio
-    audio, sr = torchaudio.load(audio_path)  # type: ignore
-
-    # Resample if needed
-    if sr != SAMPLE_RATE:
-        resampler = torchaudio.transforms.Resample(sr, SAMPLE_RATE)
-        audio = resampler(audio)
-
-    # Convert to mono if stereo
-    if audio.shape[0] > 1:
-        audio = audio.mean(dim=0)
+    audio = load_audio(audio_path)
 
     video_file_name = video_file.split('/')[-1]
 

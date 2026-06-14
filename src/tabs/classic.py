@@ -10,7 +10,7 @@ from torchvision import transforms as vt
 from typing import cast
 from gradio import skip
 
-from ..model import Model
+from ..model import Model, load_audio, add_noise
 from ..constants import *
 from ..session import SessionState
 
@@ -21,7 +21,7 @@ from utils.viz import draw_overlaid_im, draw_heatmap
 @torch.no_grad()
 def forward(
     image: torch.Tensor,
-    audio: torch.Tensor | str,
+    audio: torch.Tensor,
     model_version: str,
 ) -> np.ndarray:
     """Perform a forward pass and return the raw segmentation map as numpy array (0-255)"""
@@ -49,7 +49,7 @@ def forward(
 
 def submit(
     image_file: PImage,
-    audio_file: tuple[int, np.ndarray] | str,
+    audio_file: tuple[int, np.ndarray] | str | torch.Tensor,
     model_name: str,
     model_version: str,
     threshold: float,
@@ -69,32 +69,7 @@ def submit(
     # simulate batch dimension
     image = image.unsqueeze(0)
 
-    if type(audio_file) == str:
-        audio = audio_file
-        assert(type(audio) == str)
-    else:
-        sr, audio = audio_file
-        assert(type(audio) == np.ndarray)
-        needs_normalization = audio.dtype == np.int16
-        audio = torch.Tensor(audio)
-
-        if audio.ndim == 1:
-            audio = audio.unsqueeze(0)
-
-        if audio.ndim == 2 and audio.shape[0] > audio.shape[1]:
-            audio = audio.T
-
-        if sr != SAMPLE_RATE:
-            resampler = torchaudio.transforms.Resample(cast(int, sr), SAMPLE_RATE)
-            audio = resampler(audio)
-
-        if audio.shape[0] > 1:
-            audio = audio.mean(dim=0, keepdim=True)
-
-        # audios can be normalized to -1,1 OR occupy the whole np.int16 range depending on the loading method
-        if needs_normalization:
-            audio = audio / np.iinfo(np.int16).max
-        assert(type(audio) == torch.Tensor)
+    audio = load_audio(audio_file)
 
     # Get raw segmentation
     seg = forward(image, audio, model_version)
@@ -154,3 +129,19 @@ def load_example_audio() -> list[str]:
             for f in ['bassoon.wav', 'roar.wav', 'chew.wav', 'silence.wav', 'noise.wav']
         ]
     return []
+
+def apply_snr(
+    audio_file: tuple[int, np.ndarray] | str | torch.Tensor,
+    snr: str
+) -> tuple[int, np.ndarray]:
+    audio = load_audio(audio_file)
+
+    if snr == 'inf':
+        noisy_audio = audio
+    else:
+        noise = torch.clip(torch.randn(audio.shape), min=-1., max=1.)
+        noisy_audio = add_noise(audio, noise, torch.Tensor([float(snr)]))
+
+    noisy_audio_np = (noisy_audio * np.iinfo(np.int16).max).numpy().astype(np.int16)[0]
+
+    return SAMPLE_RATE, noisy_audio_np
