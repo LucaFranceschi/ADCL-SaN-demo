@@ -84,6 +84,7 @@ html_output_table = """
 
         width: 24px;
         margin: 0 auto;
+        align-content: center !important;
     }}
 
     .img-container {{
