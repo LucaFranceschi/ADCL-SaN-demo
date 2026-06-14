@@ -1,0 +1,142 @@
+import os
+
+import torch
+import torchaudio
+import numpy as np
+
+from PIL import Image
+from PIL.Image import Image as PImage
+from torchvision import transforms as vt
+from typing import cast
+
+from ..model import Model
+from ..constants import *
+from ..session import SessionState
+
+from utils.viz import draw_overlaid_im, draw_heatmap
+
+# ====================================== CLASSIC TAB FUNCTIONS =====================================
+
+@torch.no_grad()
+def forward(
+    image: torch.Tensor,
+    audio: torch.Tensor | str,
+    model_version: str,
+) -> np.ndarray:
+    """Perform a forward pass and return the raw segmentation map as numpy array (0-255)"""
+    model = Model(model_version)
+    model.load_model() # imports and loads weights if not done before
+    module = model.model # get handle of module instance
+    assert(module != None)
+
+    if audio == 'silence':
+        audio_driven_embedding = model.get_silence_emb()
+    elif audio == 'noise':
+        audio_driven_embedding = model.get_noise_emb()
+    else:
+        audio_driven_embedding = model.embed_audio(audio)
+
+    out_dict = module(image.to(DEVICE), resolution=INPUT_RESOLUTION, pred_emb=audio_driven_embedding)
+
+    if model_version == 'ADCL_vA_B16':
+        seg = ((out_dict['positive']['v_d_seg'].squeeze().cpu().numpy()) * 255).astype(np.uint8)
+    else:
+        seg = ((out_dict['positive']['m_i_seg'].squeeze().cpu().numpy()) * 255).astype(np.uint8)
+
+    return seg
+
+
+def submit(
+    image_file: PImage,
+    audio_file: tuple[int, np.ndarray] | str,
+    model_name: str,
+    model_version: str,
+    threshold: float,
+    state: SessionState,
+    comparison_flag: bool = False
+) -> tuple[PImage, PImage, SessionState]:
+    """Submit image + audio and return heatmap and overlaid visualization"""
+    original_resolution = image_file.size
+
+    image_transform = vt.Compose([
+        vt.Resize((INPUT_RESOLUTION, INPUT_RESOLUTION), vt.InterpolationMode.BICUBIC),
+        vt.ToTensor(),
+        vt.Normalize((0.48145466, 0.4578275, 0.40821073), (0.26862954, 0.26130258, 0.27577711)),  # CLIP
+    ])
+    image = cast(torch.Tensor, image_transform(image_file))
+
+    # simulate batch dimension
+    image = image.unsqueeze(0)
+
+    if type(audio_file) == str:
+        audio = audio_file
+        assert(type(audio) == str)
+    else:
+        sr, audio = audio_file
+        assert(type(audio) == np.ndarray)
+        needs_normalization = audio.dtype == np.int16
+        audio = torch.Tensor(audio)
+
+        if audio.ndim == 1:
+            audio = audio.unsqueeze(0)
+
+        if audio.ndim == 2 and audio.shape[0] > audio.shape[1]:
+            audio = audio.T
+
+        if sr != SAMPLE_RATE:
+            resampler = torchaudio.transforms.Resample(cast(int, sr), SAMPLE_RATE)
+            audio = resampler(audio)
+
+        if audio.shape[0] > 1:
+            audio = audio.mean(dim=0, keepdim=True)
+
+        # audios can be normalized to -1,1 OR occupy the whole np.int16 range depending on the loading method
+        if needs_normalization:
+            audio = audio / np.iinfo(np.int16).max
+        assert(type(audio) == torch.Tensor)
+
+    # Get raw segmentation
+    seg = forward(image, audio, model_version)
+
+    # Store in state
+    if not comparison_flag:
+        state['image_seg'] = seg
+        state['image_resolution'] = original_resolution
+    else:
+        state['comparison_segs'].append(seg)
+        state['comparison_resolution'] = original_resolution
+
+    # Create overlaid image
+    heatmap = draw_heatmap(seg, original_resolution)
+    overlaid = draw_overlaid_im(image_file, Image.fromarray(heatmap))
+
+    # Apply threshold
+    seg_thresholded = apply_threshold_to_segmentation(seg, threshold)
+    heatmap_mask = Image.fromarray(draw_heatmap(seg_thresholded, original_resolution))
+
+    return heatmap_mask, overlaid, state
+
+# @gr.cache
+def update_threshold(thr: float, state: SessionState) -> PImage:
+    """Update threshold for image segmentation"""
+    if 'image_seg' not in state or 'image_resolution' not in state:
+        return gr.skip() # type: ignore
+
+    seg_thresholded = apply_threshold_to_segmentation(state['image_seg'], thr)
+    heatmap_mask = draw_heatmap(seg_thresholded, state['image_resolution'])
+    return Image.fromarray(heatmap_mask)
+
+def load_example_frames() -> list[str]:
+    if os.path.exists(FRAMES_EXAMPLES_PATH):
+        return sorted([
+            os.path.join(FRAMES_EXAMPLES_PATH, f) for f in os.listdir(FRAMES_EXAMPLES_PATH)
+        ])
+    return []
+
+def load_example_audio() -> list[str]:
+    if os.path.exists(AUDIOS_EXAMPLES_PATH):
+        return [
+            os.path.join(AUDIOS_EXAMPLES_PATH, f)
+            for f in ['bassoon.wav', 'roar.wav', 'chew.wav', 'silence.wav', 'noise.wav']
+        ]
+    return []
