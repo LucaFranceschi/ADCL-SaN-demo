@@ -6,6 +6,7 @@ import subprocess
 import uuid
 import shutil
 import base64
+import tqdm
 
 import numpy as np
 import gradio as gr
@@ -286,10 +287,9 @@ def submit(
 ) -> tuple[PImage, PImage, SessionState]:
     """Submit image + audio and return heatmap and overlaid visualization"""
     original_resolution = image_file.size
-    resolution = min(original_resolution)
 
     image_transform = vt.Compose([
-        vt.Resize((resolution, resolution), vt.InterpolationMode.BICUBIC),
+        vt.Resize((INPUT_RESOLUTION, INPUT_RESOLUTION), vt.InterpolationMode.BICUBIC),
         vt.ToTensor(),
         vt.Normalize((0.48145466, 0.4578275, 0.40821073), (0.26862954, 0.26130258, 0.27577711)),  # CLIP
     ])
@@ -352,6 +352,7 @@ def forward_video(
     frames: torch.Tensor,
     audio: torch.Tensor,
     model_version: str,
+    progress: gr.Progress
 ) -> np.ndarray:
     """Perform forward pass on video frames"""
     model = Model(model_version)
@@ -367,11 +368,11 @@ def forward_video(
         TEXT_POS_AT_PROMPT,
         PROMPT_LENGTH
     )
-
+    progress(0, desc="Starting")
     v_seg = []
-    for i in range(frames.shape[0]):
+    for i in progress.tqdm(range(frames.shape[0]), desc=f'Processing video...'):
         out_dict = module(
-            frames[i].unsqueeze(0).to(DEVICE),
+            frames[i].unsqueeze(0).to(DEVICE), #type: ignore
             resolution=INPUT_RESOLUTION,
             pred_emb=audio_driven_embedding
         )
@@ -438,9 +439,12 @@ def submit_video(
     model_name: str,
     model_version: str,
     threshold: float,
-    state: SessionState
+    state: SessionState,
+    progress=gr.Progress()
 ) -> tuple[str, str, SessionState]:
     """Submit video and return heatmap and overlaid visualization"""
+    progress(0, desc=f"Loading input video...")
+
     # Extract video frames
     video = cv2.VideoCapture(video_file)
     original_resolution = (
@@ -450,9 +454,8 @@ def submit_video(
 
     fps = int(video.get(cv2.CAP_PROP_FPS))
 
-    resolution = min(original_resolution)
     image_transform = vt.Compose([
-        vt.Resize((resolution, resolution), vt.InterpolationMode.BICUBIC),
+        vt.Resize((INPUT_RESOLUTION, INPUT_RESOLUTION), vt.InterpolationMode.BICUBIC),
         vt.ToTensor(),
         vt.Normalize((0.48145466, 0.4578275, 0.40821073), (0.26862954, 0.26130258, 0.27577711)),  # CLIP
     ])
@@ -507,12 +510,15 @@ def submit_video(
             video_file_name.removesuffix('.mp4') + '_' + '_'.join([model_version, 'v_seg.npy'])
         )
         if os.path.exists(likely_output_path):
+            progress(0.5, desc=f"Loading cached example...")
             v_seg = np.load(likely_output_path)
         else:
-            v_seg = forward_video(frames, audio, model_version)
+            progress(0, desc=f"Example not cached. This might take a while...")
+            v_seg = forward_video(frames, audio, model_version, progress)
             np.save(likely_output_path, v_seg)
     else:
-        v_seg = forward_video(frames, audio, model_version)
+        progress(0, desc=f"This might take a while...")
+        v_seg = forward_video(frames, audio, model_version, progress)
 
     # Store in state
     state['video_seg'] = v_seg
@@ -522,6 +528,8 @@ def submit_video(
 
     model = Model(model_version)
     assert(model.univ_thresh != None)
+
+    progress(1, desc=f"Showing output...")
 
     # Create overlaid image
     v_overlaid = []
@@ -976,7 +984,7 @@ with gr.Blocks(css=root_css) as demo:
                         )
                         model_name_in_video.change(fn=update_versions, inputs=model_name_in_video, outputs=model_version_name_in_video)
 
-                    video_in = gr.Video(label="Video Input", height=300)
+                    video_in = gr.Video(label="Video Input", height=400)
                     # Display examples if available
                     if example_videos_count > 0:
                         gr.Markdown(f"**Available examples:** {' | '.join([f'{cat} ({len(vids)})' for cat, vids in example_videos_dict.items() if vids])}")
