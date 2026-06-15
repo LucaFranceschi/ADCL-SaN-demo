@@ -30,12 +30,7 @@ def forward(
     module = model.model # get handle of module instance
     assert(module != None)
 
-    if audio == 'silence':
-        audio_driven_embedding = model.get_silence_emb()
-    elif audio == 'noise':
-        audio_driven_embedding = model.get_noise_emb()
-    else:
-        audio_driven_embedding = model.embed_audio(audio)
+    audio_driven_embedding = model.embed_audio(audio)
 
     out_dict = module(image.to(DEVICE), resolution=INPUT_RESOLUTION, pred_emb=audio_driven_embedding)
 
