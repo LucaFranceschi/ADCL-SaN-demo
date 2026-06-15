@@ -24,6 +24,7 @@ def forward_video(
     frames: torch.Tensor,
     audio: torch.Tensor,
     model_version: str,
+    fps: float,
     progress: Progress
 ) -> np.ndarray:
     """Perform forward pass on video frames"""
@@ -32,17 +33,20 @@ def forward_video(
     module = model.model # get handle of module instance
     assert(module != None)
 
-    placeholder_tokens = module.get_placeholder_token(PROMPT_TEMPLATE.replace('{}', ''))
-
-    audio_driven_embedding = module.encode_audio(
-        audio.to(module.device),
-        placeholder_tokens,
-        TEXT_POS_AT_PROMPT,
-        PROMPT_LENGTH
-    )
     progress(0, desc="Starting")
     v_seg = []
     for i in progress.tqdm(range(frames.shape[0]), desc=f'Processing video...'):
+        placeholder_tokens = module.get_placeholder_token(PROMPT_TEMPLATE.replace('{}', ''))
+
+        trimmed_audio = trim_audio(audio, i, SAMPLE_RATE, fps) #type: ignore
+
+        audio_driven_embedding = module.encode_audio(
+            trimmed_audio.to(module.device),
+            placeholder_tokens,
+            TEXT_POS_AT_PROMPT,
+            PROMPT_LENGTH
+        )
+
         out_dict = module(
             frames[i].unsqueeze(0).to(DEVICE), #type: ignore
             resolution=INPUT_RESOLUTION,
@@ -176,11 +180,11 @@ def submit_video(
             v_seg = np.load(likely_output_path)
         else:
             progress(0, desc=f"Example not cached. This might take a while...")
-            v_seg = forward_video(frames, audio, model_version, progress)
+            v_seg = forward_video(frames, audio, model_version, fps, progress)
             np.save(likely_output_path, v_seg)
     else:
         progress(0, desc=f"This might take a while...")
-        v_seg = forward_video(frames, audio, model_version, progress)
+        v_seg = forward_video(frames, audio, model_version, fps, progress)
 
     # Store in state
     state['video_seg'] = v_seg
@@ -284,3 +288,22 @@ def organize_examples_for_gradio(examples_dict: dict[str, list[str]]) -> list[li
         examples_list += examples_dict[category]
 
     return examples_list
+
+
+def trim_audio(audio: torch.Tensor, center_frame: int, sr: int, fps: float) -> torch.Tensor:
+    current_audio_center_idx = int(center_frame*(sr/fps)) #type:ignore
+    audio_start_idx = current_audio_center_idx - (3 * sr) // 2
+    audio_end_idx = current_audio_center_idx + (3 * sr) // 2
+
+    if audio_start_idx < 0:
+        audio_end_idx -= audio_start_idx
+        audio_start_idx = 0
+
+    if audio_end_idx >= audio.shape[-1]:
+        audio_start_idx -= audio_end_idx - (audio.shape[-1]) + 1
+        audio_end_idx = audio.shape[-1]
+
+    audio_start_idx = max(0, audio_start_idx)
+    audio_end_idx = min(audio_end_idx, audio.shape[-1])
+
+    return audio[..., audio_start_idx:audio_end_idx+1]

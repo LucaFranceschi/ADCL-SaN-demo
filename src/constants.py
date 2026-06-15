@@ -27,6 +27,7 @@ print(f'Device: {DEVICE} is used\n')
 
 INPUT_RESOLUTION = 352
 SAMPLE_RATE = 16000
+VIDEO_AUDIO_WINDOW = 3
 PROMPT_TEMPLATE, TEXT_POS_AT_PROMPT, PROMPT_LENGTH = get_prompt_template()
 
 # =========================================== FUNCTIONS ============================================
