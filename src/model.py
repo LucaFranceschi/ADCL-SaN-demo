@@ -127,32 +127,6 @@ class Model:
             del self.model
             self.model = None
 
-    def get_silence_emb(self) -> torch.Tensor:
-        if self.silence_emb == None:
-            assert(self.model != None)
-            placeholder_tokens = self.model.get_placeholder_token(PROMPT_TEMPLATE.replace('{}', ''))
-
-            self.silence_emb = self.model.encode_audio(
-                torch.zeros((1, 3*SAMPLE_RATE)).to(self.model.device),
-                placeholder_tokens,
-                TEXT_POS_AT_PROMPT,
-                PROMPT_LENGTH
-            )
-        return self.silence_emb
-
-    def get_noise_emb(self) -> torch.Tensor:
-        if self.noise_emb == None:
-            assert(self.model != None)
-            placeholder_tokens = self.model.get_placeholder_token(PROMPT_TEMPLATE.replace('{}', ''))
-
-            self.noise_emb = self.model.encode_audio(
-                torch.clip(torch.randn((1, 3*SAMPLE_RATE)), min=-1., max=1.).to(self.model.device),
-                placeholder_tokens,
-                TEXT_POS_AT_PROMPT,
-                PROMPT_LENGTH
-            )
-        return self.noise_emb
-
     def embed_audio(self, audio: torch.Tensor) -> torch.Tensor:
         assert(self.model != None)
         placeholder_tokens = self.model.get_placeholder_token(PROMPT_TEMPLATE.replace('{}', ''))

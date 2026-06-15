@@ -1,4 +1,4 @@
-import base64
+import os, base64
 
 import numpy as np
 
@@ -79,7 +79,7 @@ def update_comparison_threshold(
 
 def submit_comparison(
     image_file: PImage,
-    audio_file: tuple[int, np.ndarray],
+    audio_file: tuple[int, np.ndarray] | str | torch.Tensor,
     model_name: str,
     output_type: str,
     thresh_type: str,
@@ -111,7 +111,9 @@ def submit_comparison(
         col_labels.append(display_name)
         comparison_models.append(model_version)
 
-        for audio in [audio_file, "silence", "noise"]:
+        for audio in [audio_file,
+                      os.path.join(AUDIOS_EXAMPLES_PATH, "silence.wav"),
+                      os.path.join(AUDIOS_EXAMPLES_PATH, "noise.wav")]:
             progress(step / total_steps, desc=f"Running {display_name}...")
             mask, overlaid, state = submit(
                 image_file, audio, model_name, model_version,
