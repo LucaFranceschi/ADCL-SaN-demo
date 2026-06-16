@@ -36,6 +36,16 @@ def on_dropdown_change(thresh_choice: str, model_version: str):
 def on_shown_output(model_version):
     return gr.update(value=Model(model_version).univ_thresh, interactive=True), gr.update(interactive=True)
 
+def update_run_btn(image_in, audio_in):
+    if image_in is not None and audio_in is not None:
+        return gr.update(interactive=True)
+    return gr.update(interactive=False)
+
+def update_run_btn_video(video_in):
+    if video_in is not None:
+        return gr.update(interactive=True)
+    return gr.update(interactive=False)
+
 # ========================================== APPLICATION ===========================================
 
 CHOICES_MODELS = ['ACL-SaN', 'ADCL']
@@ -104,7 +114,7 @@ with gr.Blocks(css=root_css, title=title) as demo:
                     )
 
                 with gr.Column(scale=3):
-                    btn_comp = gr.Button("Run")
+                    btn_comp = gr.Button("Run", interactive=False)
                     comp_html_out = gr.HTML(
                         value=html_empty_box_for_output,
                         padding=False,
@@ -146,6 +156,18 @@ with gr.Blocks(css=root_css, title=title) as demo:
                         inputs=[output_type_toggle, dropdown_thresh_comp, threshold_slider_comp, session_state],
                         outputs=[comp_html_out],
                     )
+
+
+            image_in_comp.change(
+                fn=update_run_btn,
+                inputs=[image_in_comp, audio_in_comp],
+                outputs=btn_comp
+            )
+            audio_in_comp.change(
+                fn=update_run_btn,
+                inputs=[image_in_comp, audio_in_comp],
+                outputs=btn_comp
+            )
 
             btn_comp.click(
                 fn=submit_comparison,
@@ -210,7 +232,7 @@ with gr.Blocks(css=root_css, title=title) as demo:
                     )
 
                 with gr.Column():
-                    btn = gr.Button("Run")
+                    btn = gr.Button("Run", interactive=False)
                     overlaid_out = gr.Image(type='pil', label="Overlaid with Original", height=300)
                     heatmap_out = gr.Image(type='pil', label="Heatmap (Grayscale)", height=300)
                     with gr.Row():
@@ -254,6 +276,17 @@ with gr.Blocks(css=root_css, title=title) as demo:
                         inputs=[dropdown_thresh, threshold_slider, model_version_name_in, session_state],
                         outputs=heatmap_out,
                     )
+
+            image_in.change(
+                fn=update_run_btn,
+                inputs=[image_in, audio_in],
+                outputs=btn
+            )
+            audio_in.change(
+                fn=update_run_btn,
+                inputs=[image_in, audio_in],
+                outputs=btn
+            )
 
             btn.click(
                 fn=submit,
@@ -301,7 +334,7 @@ with gr.Blocks(css=root_css, title=title) as demo:
                                 examples_per_page=5,
                             )
                 with gr.Column():
-                    btn_video = gr.Button("Run")
+                    btn_video = gr.Button("Run", interactive=False)
                     v_overlaid_out = gr.Video(label="Overlaid with Original", height=300)
                     v_heatmap_out = gr.Video(label="Heatmap (Grayscale)", height=300)
                     with gr.Row():
@@ -345,6 +378,12 @@ with gr.Blocks(css=root_css, title=title) as demo:
                         inputs=[dropdown_thresh_video, threshold_slider_video, model_version_name_in_video, session_state],
                         outputs=v_heatmap_out,
                     )
+
+            video_in.change(
+                fn=update_run_btn_video,
+                inputs=video_in,
+                outputs=btn_video
+            )
 
             btn_video.click(
                 fn=submit_video,
