@@ -46,6 +46,9 @@ def update_run_btn_video(video_in):
         return gr.update(interactive=True)
     return gr.update(interactive=False)
 
+def update_snr_button(audio_in):
+    return update_run_btn_video(audio_in)
+
 # ========================================== APPLICATION ===========================================
 
 CHOICES_MODELS = ['ACL-SaN', 'ADCL']
@@ -104,7 +107,7 @@ with gr.Blocks(css=root_css, title=title) as demo:
                         label="SNR Picker",
                         value='inf',
                         elem_classes="equal-radio",
-                        interactive=True
+                        interactive=False
                     )
 
                     snr_comp.change(
@@ -169,6 +172,12 @@ with gr.Blocks(css=root_css, title=title) as demo:
                 outputs=btn_comp
             )
 
+            audio_in_comp.change(
+                fn=update_snr_button,
+                inputs=[audio_in_comp],
+                outputs=snr_comp
+            )
+
             btn_comp.click(
                 fn=submit_comparison,
                 inputs=[image_in_comp, audio_in_comp, model_name_in_comp,
@@ -222,7 +231,7 @@ with gr.Blocks(css=root_css, title=title) as demo:
                         label="SNR Picker",
                         value='inf',
                         elem_classes="equal-radio",
-                        interactive=True
+                        interactive=False
                     )
 
                     snr.change(
@@ -286,6 +295,12 @@ with gr.Blocks(css=root_css, title=title) as demo:
                 fn=update_run_btn,
                 inputs=[image_in, audio_in],
                 outputs=btn
+            )
+
+            audio_in.change(
+                fn=update_snr_button,
+                inputs=[audio_in],
+                outputs=snr
             )
 
             btn.click(
