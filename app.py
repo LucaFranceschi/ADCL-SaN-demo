@@ -49,6 +49,12 @@ def update_run_btn_video(video_in):
 def update_snr_button(audio_in):
     return update_run_btn_video(audio_in)
 
+def load_audio_wrapper(audio_in, snr, state):
+    state['original_audio'] = audio_in
+    if audio_in == None:
+        return gr.update(value='inf', interactive=False), state
+    return gr.update(value='inf'), state
+
 # ========================================== APPLICATION ===========================================
 
 CHOICES_MODELS = ['ACL-SaN', 'ADCL']
@@ -94,11 +100,15 @@ with gr.Blocks(css=root_css, title=title) as demo:
                         audio_in_comp = gr.Audio(label="Audio Input")
                         audio_in_comp.unrender()
                         with gr.Column(scale=1):
+                            _example_pipe_comp = gr.State(None)
                             gr.Examples(
                                 examples=load_example_audio(),
                                 inputs=[audio_in_comp],
                                 label="Click to load an audio",
                                 examples_per_page=5,
+                                outputs=[_example_pipe_comp],
+                                fn=lambda audio: audio,
+                                run_on_click=True,
                             )
                         with gr.Column(scale=10):
                             audio_in_comp.render()
@@ -112,7 +122,7 @@ with gr.Blocks(css=root_css, title=title) as demo:
 
                     snr_comp.change(
                         fn=apply_snr,
-                        inputs=[audio_in_comp, snr_comp],
+                        inputs=[audio_in_comp, snr_comp, session_state],
                         outputs=[audio_in_comp]
                     )
 
@@ -178,6 +188,18 @@ with gr.Blocks(css=root_css, title=title) as demo:
                 outputs=snr_comp
             )
 
+            audio_in_comp.input(
+                fn=load_audio_wrapper,
+                inputs=[audio_in_comp, snr_comp, session_state],
+                outputs=[snr_comp, session_state]
+            )
+
+            _example_pipe_comp.change(
+                fn=load_audio_wrapper,
+                inputs=[_example_pipe_comp, snr_comp, session_state],
+                outputs=[snr_comp, session_state]
+            )
+
             btn_comp.click(
                 fn=submit_comparison,
                 inputs=[image_in_comp, audio_in_comp, model_name_in_comp,
@@ -218,11 +240,15 @@ with gr.Blocks(css=root_css, title=title) as demo:
                         audio_in = gr.Audio(label="Audio Input")
                         audio_in.unrender()
                         with gr.Column(scale=1):
+                            _example_pipe = gr.State(None)
                             gr.Examples(
                                 examples=load_example_audio(),
                                 inputs=[audio_in],
                                 label="Click to load an audio",
                                 examples_per_page=5,
+                                outputs=[_example_pipe],
+                                fn=lambda audio: audio,
+                                run_on_click=True,
                             )
                         with gr.Column(scale=10):
                             audio_in.render()
@@ -236,7 +262,7 @@ with gr.Blocks(css=root_css, title=title) as demo:
 
                     snr.change(
                         fn=apply_snr,
-                        inputs=[audio_in, snr],
+                        inputs=[audio_in, snr, session_state],
                         outputs=[audio_in]
                     )
 
@@ -301,6 +327,18 @@ with gr.Blocks(css=root_css, title=title) as demo:
                 fn=update_snr_button,
                 inputs=[audio_in],
                 outputs=snr
+            )
+
+            audio_in.input(
+                fn=load_audio_wrapper,
+                inputs=[audio_in, snr, session_state],
+                outputs=[snr, session_state]
+            )
+
+            _example_pipe.change(
+                fn=load_audio_wrapper,
+                inputs=[_example_pipe, snr, session_state],
+                outputs=[snr, session_state]
             )
 
             btn.click(

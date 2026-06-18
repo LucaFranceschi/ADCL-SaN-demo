@@ -157,7 +157,7 @@ def load_audio(audio_file: tuple[int, np.ndarray] | str | torch.Tensor) -> torch
 
         # Convert to mono if stereo
         if audio.shape[0] > 1:
-            audio = audio.mean(dim=0)
+            audio = audio.mean(dim=0, keepdim=True)
 
         return audio
     else:

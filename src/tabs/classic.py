@@ -127,9 +127,13 @@ def load_example_audio() -> list[str]:
 
 def apply_snr(
     audio_file: tuple[int, np.ndarray] | str | torch.Tensor,
-    snr: str
+    snr: str,
+    state: SessionState
 ) -> tuple[int, np.ndarray]:
-    audio = load_audio(audio_file)
+    if not ('original_audio' in state and state["original_audio"] is not None):
+        return skip() #type: ignore
+
+    audio = load_audio(state['original_audio'])
 
     if snr == 'inf':
         noisy_audio = audio

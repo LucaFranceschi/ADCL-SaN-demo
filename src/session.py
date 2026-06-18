@@ -23,7 +23,7 @@ class SessionState(_SessionState, total=False):
     video_audio_path: str
     video_fps: int
     comparison_resolution: tuple[int, int]
-
+    original_audio: tuple[int, np.ndarray]
 
 def create_session() -> SessionState:
     """Create a new session with its own directory"""
@@ -39,7 +39,6 @@ def create_session() -> SessionState:
         comparison_segs=[],
         comparison_models=[]
     )
-
 
 def cleanup_session(state: SessionState) -> None:
     """Clean up session directory and files"""
