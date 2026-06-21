@@ -9,7 +9,7 @@ from io import BytesIO
 import gradio as gr
 
 from .classic import submit
-from ..model import Model, MODEL_REGISTRY
+from ..model import Model, MODEL_REGISTRY_ACL_SAN, MODEL_REGISTRY_ADCL
 from ..constants import *
 from ..session import SessionState
 from ..front_utils import images_to_html
@@ -139,5 +139,7 @@ def _render_comparison_html(grid: list[PImage], col_labels: list[str]) -> str:
 
 # Build CHOICES_VERSIONS from the registry
 CHOICES_VERSIONS = {}
-for key, cfg in MODEL_REGISTRY.items():
+for key, cfg in MODEL_REGISTRY_ACL_SAN.items():
+    CHOICES_VERSIONS.setdefault(cfg['group'], []).append((cfg['display_name'], key))
+for key, cfg in MODEL_REGISTRY_ADCL.items():
     CHOICES_VERSIONS.setdefault(cfg['group'], []).append((cfg['display_name'], key))

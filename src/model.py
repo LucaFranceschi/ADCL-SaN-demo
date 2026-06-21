@@ -5,7 +5,7 @@ import torchaudio
 
 from .constants import *
 
-MODEL_REGISTRY = {
+MODEL_REGISTRY_ACL_SAN = {
 'baseline': {'display_name': 'ACL-SSL Baseline',
              'model_classname': 'ACL',
              'group': 'ACL-SaN',
@@ -48,6 +48,20 @@ MODEL_REGISTRY = {
                    'weights_path': 'ACL-SaN_v5_B16_E16.pth',
                    'config_file_path': 'ACL_ViT16.yaml',
                    'univ_thresh': 0.613},
+}
+MODEL_REGISTRY_ADCL = {
+'baseline': {'display_name': 'ACL-SSL Baseline',
+             'model_classname': 'ACL',
+             'group': 'ADCL',
+             'weights_path': 'ACL_ViT16_test_best_param/Param_best.pth',
+             'config_file_path': 'ACL_ViT16.yaml',
+             'univ_thresh': 0.87},
+'ACL-SaN_v1_B16': {'display_name': 'ACL-SaN v1',
+                   'model_classname': 'ACL',
+                   'group': 'ADCL',
+                   'weights_path': 'ACL-SaN_v1_B16_E17.pth',
+                   'config_file_path': 'ACL_ViT16.yaml',
+                   'univ_thresh': 0.92},
 'ADCL_vA_B16': {'display_name': 'ADCL vA',
                 'model_classname': 'ADCL',
                 'group': 'ADCL',
@@ -139,7 +153,9 @@ class Model:
         )
 
 # Instantiate all models from the registry
-for key, cfg in MODEL_REGISTRY.items():
+for key, cfg in MODEL_REGISTRY_ADCL.items():
+    Model(key, **{k: v for k, v in cfg.items()})
+for key, cfg in MODEL_REGISTRY_ACL_SAN.items():
     Model(key, **{k: v for k, v in cfg.items()})
 
 # ======================================= HELPER FUNCTIONS =========================================

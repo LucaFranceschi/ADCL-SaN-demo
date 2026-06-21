@@ -7,7 +7,7 @@ root_css = """
     flex: 1 1 0 !important;   /* all items grow equally */
 }
 
-#component-12, #component-17, #component-38, #component-43 {
+#component-12, #component-17, #component-39, #component-44 {
     min-width: 100px !important;
     max-width: 101px !important;
     flex-grow: 0 !important;

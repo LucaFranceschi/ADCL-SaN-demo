@@ -1,7 +1,7 @@
 import gradio as gr
 
 from src.front_utils import html_empty_box_for_output, root_css
-from src.model import Model, MODEL_REGISTRY
+from src.model import Model, MODEL_REGISTRY_ACL_SAN, MODEL_REGISTRY_ADCL
 from src.session import create_session, cleanup_session
 from src.tabs.classic import load_example_frames, load_example_audio, submit, update_threshold, apply_snr
 from src.tabs.video import load_example_videos, organize_examples_for_gradio, submit_video, update_threshold_video
@@ -61,7 +61,9 @@ CHOICES_MODELS = ['ACL-SaN', 'ADCL']
 
 # Build CHOICES_VERSIONS from the registry
 CHOICES_VERSIONS = {}
-for key, cfg in MODEL_REGISTRY.items():
+for key, cfg in MODEL_REGISTRY_ACL_SAN.items():
+    CHOICES_VERSIONS.setdefault(cfg['group'], []).append((cfg['display_name'], key))
+for key, cfg in MODEL_REGISTRY_ADCL.items():
     CHOICES_VERSIONS.setdefault(cfg['group'], []).append((cfg['display_name'], key))
 
 choices_models_init = CHOICES_MODELS[0]
