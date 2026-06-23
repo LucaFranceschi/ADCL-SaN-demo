@@ -123,7 +123,7 @@ def submit_comparison(
             seg_masks_list.append(mask)
             step += 1
 
-        model.offload_model() # TODO: REMOVE BEFORE FINAL RELEASE
+        # model.offload_model() # TODO: REMOVE BEFORE FINAL RELEASE
 
     progress(1.0, desc="Done!")
     state['comparison_resolution'] = original_resolution
