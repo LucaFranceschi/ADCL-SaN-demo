@@ -451,5 +451,5 @@ with gr.Blocks(css=root_css, title=title) as demo:
             )
 
 # init app
-demo.queue(default_concurrency_limit=8)
+demo.queue(default_concurrency_limit=4)
 demo.launch(server_name="0.0.0.0", server_port=7860)
