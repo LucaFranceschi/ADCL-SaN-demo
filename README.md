@@ -1,13 +1,3 @@
----
-title: ACL-SaN and ADCL demo
-emoji: 💻
-colorFrom: gray
-colorTo: blue
-sdk: docker
-pinned: false
-license: mit
----
-
 Towards Robust Visual Sound Source Localization
 ==============
 
@@ -27,3 +17,4 @@ This work extends:
       year={2023},
 }
 ```
+This is a backup of the repository hosted in [this Hugging Face Space](https://huggingface.co/spaces/LucaFranceschi/ADCL-SaN-demo). Check it out!
